@@ -1,4 +1,4 @@
-<?php123
+<?php
 require_once 'config.php';
 require_admin();
 
