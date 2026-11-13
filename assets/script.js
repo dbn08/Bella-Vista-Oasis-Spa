@@ -165,3 +165,75 @@ document.addEventListener('DOMContentLoaded', () => {
     initMenuSlider();
   }
 })();
+
+/* Fade-in on scroll */
+(function () {
+  if (!('IntersectionObserver' in window)) return;
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+  function initReveal() {
+    var targets = [];
+
+    function mark(selector, variant, stagger) {
+      var counts = new Map();
+      Array.prototype.forEach.call(document.querySelectorAll(selector), function (el) {
+        if (el.classList.contains('reveal')) return;
+        var parent = el.parentNode;
+        var i = counts.get(parent) || 0;
+        counts.set(parent, i + 1);
+        el.classList.add('reveal');
+        if (variant) el.classList.add('reveal-' + variant);
+        if (stagger) el.style.setProperty('--d', (i * 0.12).toFixed(2) + 's');
+        targets.push(el);
+      });
+    }
+
+    /* Home page */
+    mark('.intro-art', 'left');
+    mark('.intro-text', 'right');
+    mark('.promise > div', null, true);
+    mark('.section-heading');
+    if (document.querySelector('.menu-viewport')) {
+      mark('.menu-viewport');
+      mark('.menu-controls');
+    } else {
+      mark('.service-card', null, true);
+    }
+    mark('.quote-band > *', null, true);
+    mark('.policies .eyebrow, .policies h2');
+    mark('.policy-grid > div', null, true);
+    mark('.small-note');
+    mark('.footer > *', null, true);
+
+    /* Booking at confirmation pages */
+    mark('.booking-aside > *', null, true);
+    mark('.booking-form-wrap > *');
+    mark('.confirmation-card > *', null, true);
+
+    if (!targets.length) return;
+
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) return;
+        var el = entry.target;
+        el.classList.add('is-visible');
+        io.unobserve(el);
+
+        el.addEventListener('transitionend', function done(e) {
+          if (e.target !== el || e.propertyName !== 'opacity') return;
+          el.removeEventListener('transitionend', done);
+          el.classList.remove('reveal', 'reveal-left', 'reveal-right', 'is-visible');
+          el.style.removeProperty('--d');
+        });
+      });
+    }, { threshold: 0, rootMargin: '0px 0px -8% 0px' });
+
+    targets.forEach(function (el) { io.observe(el); });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initReveal);
+  } else {
+    initReveal();
+  }
+})();
