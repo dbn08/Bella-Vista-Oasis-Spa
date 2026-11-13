@@ -1,4 +1,4 @@
-<?php
+123<?php
 require_once 'config.php';
 $services = $pdo->query('SELECT id, name, duration_minutes, price FROM services WHERE active = 1 ORDER BY name')->fetchAll();
 $selectedService = isset($_GET['service']) ? (int)$_GET['service'] : 0;
