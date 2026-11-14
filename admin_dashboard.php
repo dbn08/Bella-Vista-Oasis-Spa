@@ -3,7 +3,7 @@ require_once 'config.php';
 
 /* ---------- Access control ---------- */
 if (empty($_SESSION['admin_id'])) {
-    header('Location: admin_login.php');
+    header('Location: admin_login.php'); 
     exit;
 }
 $adminName = $_SESSION['admin_username'] ?? 'admin';
