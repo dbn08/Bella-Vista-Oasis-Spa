@@ -68,7 +68,6 @@ $services = $pdo->query('SELECT * FROM services WHERE active = 1 ORDER BY id')->
     <div><h3>Changes & cancellations</h3><p>Please contact the spa as early as possible if you need to change or cancel. The team will confirm available options.</p></div>
     <div><h3>Comfort & care</h3><p>Tell your therapist about pressure preferences, allergies, or other comfort concerns before treatment begins.</p></div>
   </div>
-  <p class="small-note">Demo policy text: replace these guidelines with the final policies approved by your instructor or client.</p>
 </section>
 </main>
 <footer class="footer"><div class="brand footer-brand"><span class="brand-mark">✦</span><span>BELLA VISTA <small>OASIS SPA</small></span></div><p>A quiet space to restore body and mind.</p><div><a href="book.php">Book an appointment</a><a href="admin_login.php">Admin</a></div><small>© <?= date('Y') ?> Bella Vista Oasis Spa · Demo academic project</small></footer>

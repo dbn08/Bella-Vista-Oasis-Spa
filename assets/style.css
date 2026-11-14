@@ -38,19 +38,19 @@
 .promise span{font:italic 300 24px var(--serif);color:var(--gold-soft)}.promise h3{font:400 28px var(--serif);margin:8px 0 9px}.promise p{font-size:15px;color:#efe4d3}
 /* Services */
 .services{background:var(--sand-light)}.section-heading{display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;margin-bottom:56px}.section-heading>p{max-width:520px;color:var(--muted);font-size:16px}
-.service-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:28px}.service-card{position:relative;isolation:isolate;overflow:hidden;border:0;border-radius:28px;padding:28px;text-align:left;color:#fff;background:var(--cocoa-dark);display:flex;flex-direction:column;justify-content:flex-end;min-height:540px}
+.service-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:28px}.service-card{position:relative;isolation:isolate;overflow:hidden;border:0;border-radius:24px;padding:24px;text-align:left;color:#fff;background:var(--cocoa-dark);display:flex;flex-direction:column;justify-content:flex-end;min-height:440px}
 .service-card::before,.service-card::after{content:'';position:absolute;inset:0;z-index:-1}.service-card::before{background:#b79f84 var(--photo1) center/cover}.service-card::after{background:linear-gradient(180deg,rgba(40,28,20,.05) 25%,rgba(40,28,20,.55) 58%,rgba(40,28,20,.92))}.service-card:nth-child(3n+2)::before{background-image:var(--photo2)}
 .service-card:nth-child(3n)::before{background-image:var(--photo3)}
 .service-icon{display:none}
-.service-duration{font-size:12px;letter-spacing:.3em;color:var(--gold-soft);font-weight:500;margin:0 0 6px;text-transform:uppercase}.service-card h3{font:500 32px/1.2 var(--serif);margin-bottom:12px;color:#fff;text-shadow:0 2px 14px rgba(0,0,0,.35)}
-.service-card p:not(.service-duration){font-size:15px;color:#f1e6d6;margin-bottom:22px}.service-bottom{margin-top:6px;padding-top:16px;border-top:1px solid rgba(255,255,255,.3);display:flex;align-items:center;justify-content:space-between;gap:10px}
-.service-bottom strong{font:500 26px var(--serif);color:#fff}.service-bottom a{font-size:12px;font-weight:500;letter-spacing:.16em;text-transform:uppercase;color:#fff;border:1px solid var(--gold-soft);border-radius:999px;padding:8px 16px}
+.service-duration{font-size:12px;letter-spacing:.3em;color:var(--gold-soft);font-weight:500;margin:0 0 6px;text-transform:uppercase}.service-card h3{font:500 28px/1.2 var(--serif);margin-bottom:12px;color:#fff;text-shadow:0 2px 14px rgba(0,0,0,.35)}
+.service-card p:not(.service-duration){font-size:15px;color:#f1e6d6;margin-bottom:16px}.service-bottom{margin-top:6px;padding-top:16px;border-top:1px solid rgba(255,255,255,.3);display:flex;align-items:center;justify-content:space-between;gap:10px}
+.service-bottom strong{font:500 24px var(--serif);color:#fff}.service-bottom a{font-size:12px;font-weight:500;letter-spacing:.16em;text-transform:uppercase;color:#fff;border:1px solid var(--gold-soft);border-radius:999px;padding:8px 16px}
 .service-bottom a:hover{background:var(--gold);color:#fff}
 /* Quote band & policies */
 .quote-band{background:linear-gradient(rgba(63,46,34,.8),rgba(63,46,34,.8)),var(--photo2) center/cover;text-align:center;color:#fff;padding:96px 20px}
 .quote-band blockquote{font:italic 300 clamp(30px,4vw,46px)/1.3 var(--serif);max-width:780px;margin:0 auto 30px}.policies{background:var(--paper)}.policies h2{text-align:center;margin-bottom:46px}
 .policy-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:22px}.policy-grid>div{background:var(--cream);border:1px solid var(--line);border-radius:24px;padding:28px 24px}.policy-grid h3{font:500 26px var(--serif);margin-bottom:10px;color:var(--cocoa)}
-.policy-grid p{font-size:15px;color:var(--muted)}.small-note{font-size:13px;color:var(--muted);margin-top:24px;text-align:center}
+.policy-grid p{font-size:15px;color:var(--muted)}.policies .small-note{display:none}.small-note{font-size:13px;color:var(--muted);margin-top:24px;text-align:center}
 /* Footer */
 .footer{padding:42px 10%;background:var(--cocoa-dark);color:#e6d9c7;display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}.footer-brand{color:#fff;font-family:var(--serif);letter-spacing:.1em}
 .footer p,.footer small{font-size:14px;color:#efe4d3}.footer>div:last-of-type{display:flex;gap:22px;font-size:14px}.compact-footer{justify-content:center;padding:22px}
