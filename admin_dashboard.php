@@ -3,7 +3,7 @@ require_once 'config.php';
 
 /* ---------- Access control ---------- */
 if (empty($_SESSION['admin_id'])) {
-    header('Location: admin_login.php'); 
+    header('Location: admin_login.php');
     exit;
 }
 $adminName = $_SESSION['admin_username'] ?? 'admin';
@@ -12,6 +12,7 @@ $adminName = $_SESSION['admin_username'] ?? 'admin';
 const BV_SLOTS = ['09:00', '10:30', '12:00', '13:30', '15:00', '16:30'];
 const BV_MAX_GUESTS = 6;
 const BV_EXTRA_RATE = 0.80;
+const HOLD_HOURS = 24;   // unpaid cash reservations are released after this
 $downRates    = ['cash' => 0.10, 'ewallet' => 0.30, 'bank' => 0.30];
 $providers    = ['ewallet' => ['gcash' => 'GCash', 'maya' => 'Maya'], 'bank' => ['bdo' => 'BDO', 'bpi' => 'BPI', 'unionbank' => 'UnionBank']];
 $methodLabels = ['cash' => 'Cash', 'ewallet' => 'E-wallet', 'bank' => 'Online banking'];
@@ -73,6 +74,36 @@ function bv_slot_taken(PDO $pdo, string $date, string $time, int $exceptId = 0):
     return (int)$st->fetchColumn() > 0;
 }
 
+
+/* Cancel unpaid cash reservations whose hold period has ended */
+function bv_release_unpaid(PDO $pdo): void {
+    try {
+        $pdo->exec("UPDATE appointments SET status = 'Cancelled' WHERE status = 'Pending' AND payment_method = 'cash' AND payment_status = 'unpaid' AND created_at < (NOW() - INTERVAL " . (int)HOLD_HOURS . " HOUR)");
+    } catch (Throwable $e) {
+    }
+}
+
+/* Best-effort email to the customer when their booking changes (needs a configured mail server) */
+function bv_notify(PDO $pdo, int $id, string $status): void {
+    $messages = [
+        'Confirmed' => 'Good news! Your booking is confirmed. We look forward to seeing you.',
+        'Cancelled' => 'Your booking has been cancelled. You are welcome to make a new booking anytime.',
+        'Completed' => 'Thank you for visiting Bella Vista Oasis Spa. We hope to see you again soon.',
+    ];
+    if (!isset($messages[$status])) return;
+    $st = $pdo->prepare('SELECT booking_code, customer_name, email, appointment_date, appointment_time FROM appointments WHERE id = ?');
+    $st->execute([$id]);
+    $a = $st->fetch();
+    if (!$a) return;
+    $base = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost')
+          . rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
+    $body = 'Hi ' . $a['customer_name'] . ",\r\n\r\n" . $messages[$status] . "\r\n\r\nBooking code: " . $a['booking_code']
+          . "\r\nDate: " . date('F j, Y', strtotime($a['appointment_date'])) . ' at ' . date('g:i A', strtotime($a['appointment_time']))
+          . "\r\n\r\nTrack your booking: " . $base . '/track.php?code=' . $a['booking_code'] . "\r\n";
+    @mail($a['email'], 'Bella Vista Oasis Spa - booking ' . $a['booking_code'] . ' ' . strtolower($status), $body,
+          "From: Bella Vista Oasis Spa <no-reply@bellavista.local>\r\nContent-Type: text/plain; charset=UTF-8");
+}
+
 function bv_save_image(string $folder, int $id, array $file, ?string $old): ?string {
     if (($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) return null;
     if ($file['error'] !== UPLOAD_ERR_OK) throw new RuntimeException('The picture could not be uploaded.');
@@ -96,6 +127,8 @@ function bv_remove_file(?string $path, string $prefix): void {
         @unlink(__DIR__ . '/' . $path);
     }
 }
+
+bv_release_unpaid($pdo);
 
 /* ---------- Live stats (polled by the page every 20 seconds) ---------- */
 if (($_GET['ajax'] ?? '') === 'stats') {
@@ -135,6 +168,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 bv_back($back);
             }
             $pdo->prepare('UPDATE appointments SET status = ? WHERE id = ?')->execute([$status, $id]);
+            bv_notify($pdo, $id, $status);
             bv_flash('success', 'Booking status updated to ' . $status . '.');
             bv_back($back);
         }
@@ -144,7 +178,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $ps = $_POST['pay_status'] ?? '';
             if ($id && in_array($ps, $payStatuses, true)) {
                 $pdo->prepare('UPDATE appointments SET payment_status = ? WHERE id = ?')->execute([$ps, $id]);
-                bv_flash('success', 'Payment marked as ' . $ps . '.');
+                $msg = 'Payment marked as ' . $ps . '.';
+                if ($ps === 'verified') {
+                    // Verified down payment confirms a pending booking (if its slot is still free).
+                    $cur = $pdo->prepare('SELECT status, appointment_date, appointment_time FROM appointments WHERE id = ?');
+                    $cur->execute([$id]);
+                    $c = $cur->fetch();
+                    if ($c && $c['status'] === 'Pending' && !bv_slot_taken($pdo, $c['appointment_date'], substr($c['appointment_time'], 0, 5), $id)) {
+                        $pdo->prepare("UPDATE appointments SET status = 'Confirmed' WHERE id = ?")->execute([$id]);
+                        bv_notify($pdo, $id, 'Confirmed');
+                        $msg = 'Payment verified and booking confirmed. The customer can see this on the Track my booking page.';
+                    }
+                }
+                bv_flash('success', $msg);
             }
             bv_back($back);
         }
@@ -357,7 +403,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 /* ---------- Page data ---------- */
-$tab = in_array($_GET['tab'] ?? '', ['overview', 'appointments', 'services', 'packages'], true) ? $_GET['tab'] : 'overview';
+$tab = in_array($_GET['tab'] ?? '', ['overview', 'appointments', 'services', 'packages', 'preview'], true) ? $_GET['tab'] : 'overview';
 $flash = $_SESSION['flash'] ?? null;
 unset($_SESSION['flash']);
 
@@ -450,7 +496,7 @@ function bv_render_items(array $list, string $kind, string $csrf, string $back):
                     <input type="hidden" name="op" value="toggle_item"><input type="hidden" name="kind" value="' . $kind . '"><input type="hidden" name="item_id" value="' . (int)$it['id'] . '">
                     <button class="btn btn-sm btn-ghost">' . ($it['active'] ? 'Deactivate' : 'Activate') . '</button>
                 </form>
-                <form method="post" class="inline" onsubmit="return confirm(\'Delete this permanently?\');">
+                <form method="post" class="inline">
                     <input type="hidden" name="csrf" value="' . bv_h($csrf) . '"><input type="hidden" name="back" value="' . bv_h($back) . '">
                     <input type="hidden" name="op" value="delete_item"><input type="hidden" name="kind" value="' . $kind . '"><input type="hidden" name="item_id" value="' . (int)$it['id'] . '">
                     <button class="btn btn-sm btn-danger">Delete</button>
@@ -605,6 +651,23 @@ dialog::backdrop { background:rgba(63,45,32,.55); }
     .topbar-in { padding:12px 16px; gap:14px; }
     .page-head h1 { font-size:30px; }
 }
+
+/* ---------- Yes / No confirmation dialog ---------- */
+dialog.cf { border:0; border-radius:24px; padding:0; width:min(420px,92vw); background:#fffdf9; color:#3f2d20; box-shadow:0 30px 80px rgba(63,45,32,.35); }
+dialog.cf::backdrop { background:rgba(63,45,32,.55); }
+.cf-body { padding:32px 30px 6px; text-align:center; }
+.cf-body h3 { margin:0 0 8px; font-family:"Cormorant Garamond", Georgia, serif; font-size:28px; font-weight:600; }
+.cf-body p { margin:0; font-size:14.5px; line-height:1.6; color:#7a6a5c; }
+.cf-foot { display:flex; gap:10px; justify-content:center; padding:22px 30px 28px; }
+.cf-no, .cf-yes { min-width:120px; padding:12px 26px; border-radius:999px; font:inherit; font-size:14px; cursor:pointer; border:1px solid #5a4030; }
+.cf-no { background:transparent; color:#5a4030; }
+.cf-no:hover { background:#f3ebdf; }
+.cf-yes { background:#5a4030; color:#fff; }
+.cf-yes:hover { background:#46301f; }
+
+dialog.cf { width:min(440px,92vw); }
+.cf-body h3 { font-family:var(--serif); }
+.preview-frame { display:block; width:100%; height:calc(100vh - 230px); min-height:640px; border:1px solid var(--line); border-radius:22px; background:#fff; }
 </style>
 </head>
 <body>
@@ -620,11 +683,11 @@ dialog::backdrop { background:rgba(63,45,32,.55); }
             <a href="?tab=appointments" class="<?= $tab === 'appointments' ? 'active' : '' ?>">Appointments</a>
             <a href="?tab=services" class="<?= $tab === 'services' ? 'active' : '' ?>">Treatments</a>
             <a href="?tab=packages" class="<?= $tab === 'packages' ? 'active' : '' ?>">Packages</a>
+            <a href="?tab=preview" class="<?= $tab === 'preview' ? 'active' : '' ?>">Booking page</a>
         </nav>
         <div class="top-actions">
-            <a class="btn btn-sm" href="book.php" target="_blank">Booking page ↗</a>
             <span><?= bv_h($adminName) ?></span>
-            <a class="btn btn-sm btn-ghost" href="admin_logout.php">Log out</a>
+            <a class="btn btn-sm btn-ghost" href="admin_logout.php" data-logout>Log out</a>
         </div>
     </div>
 </header>
@@ -754,7 +817,7 @@ dialog::backdrop { background:rgba(63,45,32,.55); }
                     <form method="post" class="inline" style="margin-top:6px;display:block">
                         <input type="hidden" name="csrf" value="<?= bv_h($csrf) ?>"><input type="hidden" name="back" value="<?= bv_h($backQs) ?>">
                         <input type="hidden" name="op" value="set_pay_status"><input type="hidden" name="appointment_id" value="<?= (int)$a['id'] ?>">
-                        <select name="pay_status" onchange="this.form.submit()">
+                        <select name="pay_status" data-confirm-select="pay" data-code="<?= bv_h($a['booking_code']) ?>">
                             <?php foreach ($payStatuses as $s): ?><option value="<?= $s ?>" <?= $a['payment_status'] === $s ? 'selected' : '' ?>><?= ucfirst($s) ?></option><?php endforeach; ?>
                         </select>
                     </form>
@@ -765,14 +828,14 @@ dialog::backdrop { background:rgba(63,45,32,.55); }
                     <form method="post" class="inline" style="margin-top:6px;display:block">
                         <input type="hidden" name="csrf" value="<?= bv_h($csrf) ?>"><input type="hidden" name="back" value="<?= bv_h($backQs) ?>">
                         <input type="hidden" name="op" value="set_status"><input type="hidden" name="appointment_id" value="<?= (int)$a['id'] ?>">
-                        <select name="booking_status" onchange="this.form.submit()">
+                        <select name="booking_status" data-confirm-select="status" data-code="<?= bv_h($a['booking_code']) ?>">
                             <?php foreach ($statuses as $s): ?><option <?= $a['status'] === $s ? 'selected' : '' ?>><?= $s ?></option><?php endforeach; ?>
                         </select>
                     </form>
                 </td>
                 <td class="right"><div class="actions">
                     <button type="button" class="btn btn-sm" data-appt="<?= bv_h(json_encode($data, JSON_UNESCAPED_UNICODE)) ?>">Edit</button>
-                    <form method="post" class="inline" onsubmit="return confirm('Delete this booking permanently?');">
+                    <form method="post" class="inline">
                         <input type="hidden" name="csrf" value="<?= bv_h($csrf) ?>"><input type="hidden" name="back" value="<?= bv_h($backQs) ?>">
                         <input type="hidden" name="op" value="delete_appointment"><input type="hidden" name="appointment_id" value="<?= (int)$a['id'] ?>">
                         <button class="btn btn-sm btn-danger">Delete</button>
@@ -793,6 +856,17 @@ dialog::backdrop { background:rgba(63,45,32,.55); }
         </div>
     <?php endif; ?>
     <?php endif; ?>
+
+<?php elseif ($tab === 'preview'): ?>
+    <div class="page-head">
+        <div>
+            <div class="eyebrow">Customer view</div>
+            <h1>Booking page</h1>
+            <p>This is exactly what your customers see. Bookings made here are real.</p>
+        </div>
+        <a class="btn btn-sm" href="book.php" target="_blank">Open in a new tab ↗</a>
+    </div>
+    <iframe class="preview-frame" src="book.php?preview=1" title="Booking page preview"></iframe>
 
 <?php elseif ($tab === 'services'): ?>
     <div class="page-head">
@@ -914,6 +988,14 @@ dialog::backdrop { background:rgba(63,45,32,.55); }
 </form>
 </dialog>
 
+<dialog id="confirmDialog" class="cf">
+    <div class="cf-body"><h3 id="cfTitle">Please confirm</h3><p id="cfText"></p></div>
+    <div class="cf-foot">
+        <button type="button" class="cf-no" id="cfNo">No</button>
+        <button type="button" class="cf-yes" id="cfYes">Yes</button>
+    </div>
+</dialog>
+
 <script>
 const PROVIDERS = <?= json_encode($providers) ?>;
 const INITIAL_LATEST = <?= (int)$stats['latest'] ?>;
@@ -943,7 +1025,7 @@ async function refreshSlots() {
     const own = date === af.dataset.origDate ? af.dataset.origTime : '';
     let booked = [];
     if (date) {
-        try { booked = (await (await fetch('check_slots.php?date=' + encodeURIComponent(date))).json()).booked || []; } catch (e) {}
+        try { booked = (await (await fetch('book.php?slots=' + encodeURIComponent(date))).json()).booked || []; } catch (e) {}
     }
     Array.from(sel.options).forEach(o => {
         if (!o.value) return;
@@ -1029,6 +1111,77 @@ async function poll() {
     } catch (e) {}
 }
 setInterval(poll, 20000);
+
+/* ---------- Yes / No confirmation ---------- */
+function askConfirm(title, message, yesLabel, noLabel) {
+    return new Promise(resolve => {
+        const d = document.getElementById('confirmDialog');
+        const yes = document.getElementById('cfYes'), no = document.getElementById('cfNo');
+        document.getElementById('cfTitle').textContent = title;
+        document.getElementById('cfText').textContent = message;
+        yes.textContent = yesLabel || 'Yes';
+        no.textContent = noLabel || 'No';
+        let result = false;
+        yes.onclick = () => { result = true; d.close(); };
+        no.onclick = () => d.close();
+        const done = () => { d.removeEventListener('close', done); resolve(result); };
+        d.addEventListener('close', done);
+        d.showModal();
+        no.focus();
+    });
+}
+
+/* Decisions that need a Yes / No answer */
+const CONFIRMS = {
+    delete_appointment: ['Delete this booking?', 'This will permanently remove the booking and cannot be undone.', 'Yes, delete'],
+    delete_item:        ['Delete this item?', 'This will permanently remove it and cannot be undone.', 'Yes, delete'],
+    save_appointment:   ['Save this booking?', 'The booking details, total and down payment will be updated.', 'Yes, save'],
+    save_item:          ['Save your changes?', 'The booking page will show the updated details.', 'Yes, save']
+};
+document.querySelectorAll('form').forEach(f => {
+    const opEl = f.querySelector('input[name="op"]');
+    if (!opEl) return;
+    let c = CONFIRMS[opEl.value];
+    if (opEl.value === 'toggle_item') {
+        const label = (f.querySelector('button') || {}).textContent.trim();
+        c = [label + ' this item?', label === 'Deactivate' ? 'It will be hidden from the booking page.' : 'It will appear on the booking page.', 'Yes, ' + label.toLowerCase()];
+    }
+    if (c) { f.dataset.cTitle = c[0]; f.dataset.cText = c[1]; f.dataset.cYes = c[2]; }
+});
+document.addEventListener('submit', async e => {
+    const f = e.target;
+    if (!f.dataset.cTitle || f.dataset.ok === '1') return;
+    e.preventDefault();
+    if (!f.reportValidity()) return;
+    const ok = await askConfirm(f.dataset.cTitle, f.dataset.cText, f.dataset.cYes, 'No');
+    if (ok) { f.dataset.ok = '1'; f.requestSubmit(); }
+});
+
+/* Status dropdowns in the table */
+document.querySelectorAll('select[data-confirm-select]').forEach(sel => {
+    sel.dataset.orig = sel.value;
+    sel.addEventListener('change', async () => {
+        const v = sel.value, code = sel.dataset.code;
+        let title, text;
+        if (sel.dataset.confirmSelect === 'status') {
+            title = 'Mark as ' + v + '?';
+            text = 'Booking ' + code + ' will be set to ' + v + '.' +
+                (v === 'Confirmed' ? ' The customer will be notified.' : v === 'Cancelled' ? ' Its time slot will be released.' : '');
+        } else {
+            title = 'Mark payment as ' + v + '?';
+            text = 'The payment of booking ' + code + ' will be set to ' + v + '.' +
+                (v === 'verified' ? ' A pending booking will be confirmed automatically.' : '');
+        }
+        const ok = await askConfirm(title, text, 'Yes', 'No');
+        if (ok) sel.form.submit(); else sel.value = sel.dataset.orig;
+    });
+});
+
+/* Log out */
+document.querySelectorAll('[data-logout]').forEach(l => l.addEventListener('click', async e => {
+    e.preventDefault();
+    if (await askConfirm('Log out?', 'You will need to sign in again to manage bookings.', 'Yes, log out', 'No, stay')) location.href = l.href;
+}));
 
 /* ---- auto-hide flash ---- */
 const t = document.querySelector('.toast');
