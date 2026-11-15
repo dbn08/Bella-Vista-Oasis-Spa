@@ -8,6 +8,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 /* ---------- Settings (keep in sync with book.php) ---------- */
 const MAX_GUESTS = 6;
+const HOLD_HOURS = 24;                              // unpaid cash reservations are released after this
 const EXTRA_GUEST_RATE = 0.80;                       // each additional guest pays 80%
 $downPayment = ['cash' => 0.10, 'ewallet' => 0.30, 'bank' => 0.30];
 $providers = [
@@ -175,6 +176,12 @@ $code = 'BV' . date('ymd') . strtoupper(bin2hex(random_bytes(3)));
 $firstService = null;
 foreach ($items as $it) { if ($it['type'] === 'service') { $firstService = $it['id']; break; } }
 
+// Free up slots held by unpaid cash reservations whose hold period has ended.
+try {
+    $pdo->exec("UPDATE appointments SET status = 'Cancelled' WHERE status = 'Pending' AND payment_method = 'cash' AND payment_status = 'unpaid' AND created_at < (NOW() - INTERVAL " . (int)HOLD_HOURS . " HOUR)");
+} catch (PDOException $e) {
+}
+
 try {
     $pdo->beginTransaction();
 
@@ -205,6 +212,20 @@ try {
     }
 
     $pdo->commit();
+
+    // Best-effort email (needs a configured mail server; the Track my booking page always works).
+    $base = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost')
+          . rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
+    $due = number_format($amountDue, 2);
+    $next = $method === 'cash'
+        ? "Please pay your down payment of PHP $due in cash at the spa front desk within " . HOLD_HOURS . " hours. Bring this booking code."
+        : "We will verify your payment (PHP $due) and update your booking shortly.";
+    $msg = "Hi $name,\r\n\r\nThank you for booking with Bella Vista Oasis Spa.\r\nBooking code: $code\r\nDate: "
+         . date('F j, Y', strtotime($date)) . ' at ' . date('g:i A', strtotime($time))
+         . "\r\nTotal: PHP " . number_format($total, 2) . "\r\n\r\n$next\r\n\r\nTrack your booking: $base/track.php?code=$code\r\n";
+    @mail($email, "Bella Vista Oasis Spa - booking $code received", $msg,
+          "From: Bella Vista Oasis Spa <no-reply@bellavista.local>\r\nContent-Type: text/plain; charset=UTF-8");
+
     $_SESSION['last_booking_code'] = $code;
     header('Location: confirmation.php?code=' . urlencode($code));
     exit;
