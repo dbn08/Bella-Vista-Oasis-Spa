@@ -1,12 +1,56 @@
 <?php
 require_once 'config.php';
 
+/* ---------- Reservation hold: unpaid cash bookings are released after this many hours ---------- */
+const HOLD_HOURS = 24;
+
+function bv_release_unpaid(PDO $pdo): void
+{
+    try {
+        $pdo->exec("UPDATE appointments SET status = 'Cancelled'
+                    WHERE status = 'Pending' AND payment_method = 'cash' AND payment_status = 'unpaid'
+                      AND created_at < (NOW() - INTERVAL " . (int)HOLD_HOURS . " HOUR)");
+    } catch (Throwable $e) {
+        // ignore: column may not exist yet
+    }
+}
+
+/* ---------- Availability endpoint:  book.php?slots=YYYY-MM-DD ---------- */
+if (isset($_GET['slots'])) {
+    header('Content-Type: application/json');
+    header('Cache-Control: no-store');
+    $d = (string)$_GET['slots'];
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $d)) {
+        echo json_encode(['booked' => []]);
+        exit;
+    }
+    bv_release_unpaid($pdo);
+    try {
+        $st = $pdo->prepare("SELECT DATE_FORMAT(appointment_time, '%H:%i') FROM appointments WHERE appointment_date = ? AND status <> 'Cancelled'");
+        $st->execute([$d]);
+        echo json_encode(['booked' => $st->fetchAll(PDO::FETCH_COLUMN)]);
+    } catch (Throwable $e) {
+        http_response_code(500);
+        echo json_encode(['booked' => [], 'error' => 'query failed']);
+    }
+    exit;
+}
+
+$preview = !empty($_GET['preview']);   // true when shown inside the admin dashboard
+
+/* ---------- Spa details shown to customers (edit these) ---------- */
+$spaInfo = [
+    'address' => 'Bella Vista Oasis Spa front desk (add your street address here)',
+    'hours'   => 'Tuesday to Sunday, 9:00 AM to 5:30 PM',
+    'phone'   => '09XX XXX XXXX',
+];
+
 /* ---------- Payment settings (edit these to your real details) ---------- */
 $downPayment = ['cash' => 0.10, 'ewallet' => 0.30, 'bank' => 0.30];   // down payment per method
 $paymentMethods = [
     'cash' => [
         'label' => 'Cash', 'icon' => '₱',
-        'hint' => (int)round($downPayment['cash'] * 100) . '% down payment · balance paid at the spa',
+        'hint' => (int)round($downPayment['cash'] * 100) . '% down payment · pay at the spa front desk',
         'note' => 'A ' . (int)round($downPayment['cash'] * 100) . '% down payment secures your slot. Our team will contact you to arrange it, and the balance is paid in cash on the day of your appointment.',
     ],
     'ewallet' => [
@@ -49,8 +93,9 @@ $paymentMethods = [
 /* ---------- Booking policies (edit to match your spa's real rules) ---------- */
 $policies = [
     ['Operating days & hours', 'Open Tuesday to Sunday, 9:00 AM to 5:30 PM. The spa is closed on Mondays.'],
-    ['Confirmation', 'Your request stays pending until our team confirms it by email or SMS. One booking can reserve a time slot.'],
+    ['Confirmation', 'Your request stays pending until your down payment is verified by our team. Use your booking code on the Track my booking page to see its status anytime.'],
     ['Down payment', 'A down payment secures your slot: ' . (int)round($downPayment['cash'] * 100) . '% for cash, ' . (int)round($downPayment['ewallet'] * 100) . '% for e-wallet and online banking. The balance is paid at the spa.'],
+    ['Reservation hold', 'Cash reservations are held for ' . HOLD_HOURS . ' hours while you pay the down payment at the spa front desk. Unpaid reservations are released automatically.'],
     ['Cancellation & rescheduling', 'Cancel or reschedule at least 24 hours before your appointment. Later cancellations and no-shows forfeit the down payment.'],
     ['Grace period', 'We hold your slot for 15 minutes after your appointment time. After that, the treatment may be shortened or the slot released.'],
     ['Guests & extra fees', 'Up to ' . 6 . ' guests per booking. The first guest pays the full price; each additional guest pays 80% of each treatment price.'],
@@ -407,20 +452,96 @@ label .field-error, .field-error { display:block; color:#b83232 !important; font
 .policy-box li::before { content:""; position:absolute; left:0; top:8px; width:6px; height:6px; border-radius:50%; background:#648568; }
 .policy-box li strong { font-size:13px; color:#3f2d20; }
 .policy-box li span { font-size:13px; line-height:1.55; color:#7a6a5c; }
+
+/* ================= Date & time (calendar + time slots) ================= */
+.dt-layout { display:grid; grid-template-columns:minmax(300px,360px) 1fr; gap:36px; align-items:start; }
+.dt-cal { border:1px solid #e4d9cb; border-radius:20px; background:#fffdf9; padding:22px; }
+.cal-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+.cal-head strong { font-family:var(--font-display, "Cormorant Garamond", Georgia, serif); font-size:22px; font-weight:600; color:#3f2d20; }
+.cal-nav { width:34px; height:34px; border-radius:50%; border:1px solid #e4d9cb; background:#fff; color:#5a4030; font-size:18px; line-height:1; cursor:pointer; padding:0; }
+.cal-nav:hover:not(:disabled) { border-color:#5a4030; }
+.cal-nav:disabled { opacity:.3; cursor:not-allowed; }
+.cal-week, .cal-days { display:grid; grid-template-columns:repeat(7,1fr); gap:4px; text-align:center; }
+.cal-week span { font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:#a09283; padding:6px 0 10px; }
+.cal-day { position:relative; aspect-ratio:1; border:0; border-radius:50%; background:none; font:inherit; font-size:14px; color:#3f2d20; cursor:pointer; padding:0; transition:background .15s; }
+.cal-day:hover:not(:disabled):not(.selected) { background:#f1e8dc; }
+.cal-day:disabled { color:#cbc1b4; cursor:not-allowed; }
+.cal-day.today::after { content:""; position:absolute; left:50%; bottom:5px; width:4px; height:4px; margin-left:-2px; border-radius:50%; background:#b58a52; }
+.cal-day.selected { background:#5a4030; color:#fff; }
+.cal-day.selected::after { background:#fff; }
+.cal-note { display:block; margin-top:14px; font-size:12px; color:#8b7a6a; text-align:center; }
+.dt-selected { font-family:var(--font-display, "Cormorant Garamond", Georgia, serif); font-size:26px; font-weight:600; color:#3f2d20; line-height:1.2; }
+.slot-group-title { font-size:11px; letter-spacing:.18em; text-transform:uppercase; color:#a09283; margin:20px 0 10px; }
+.slot-row { display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:10px; }
+.dt-times .tslot { display:block; position:relative; margin:0; padding:0; background:none; border:0; border-radius:0; box-shadow:none; font-weight:400; }
+.dt-times .tslot input { position:absolute; opacity:0; width:0; height:0; pointer-events:none; }
+.dt-times .tslot > span { display:flex; align-items:center; justify-content:center; gap:8px; height:46px; border:1px solid #d9cfc2; border-radius:10px; background:#fffdf9; font-size:14px; font-weight:500; color:#3f2d20; cursor:pointer; transition:border-color .15s, background .15s; }
+.dt-times .tslot.is-available > span:hover { border-color:#5a4030; }
+.dt-times .tslot input:checked + span { background:#5a4030; border-color:#5a4030; color:#fff; }
+.dt-times .tslot.is-booked > span, .dt-times .tslot.is-passed > span { background:#f4efe9; border-color:#ece3d6; color:#b3a798; cursor:not-allowed; }
+.dt-times .tslot em { font-style:normal; font-size:11px; letter-spacing:.04em; color:#b83232; }
+.dt-times .tslot.is-passed em { color:#b3a798; }
+.dt-times .slot-hint { display:block; margin-top:16px; font-size:12px; color:#8b7a6a; }
+@media (max-width:900px) { .dt-layout { grid-template-columns:1fr; } }
+
+/* ================= Treatment slider ================= */
+.slider { position:relative; }
+.choice-list { display:flex !important; grid-template-columns:none !important; gap:20px; max-height:none !important; overflow-x:auto !important; overflow-y:hidden !important; scroll-snap-type:x mandatory; scroll-behavior:smooth; margin:0 !important; padding:18px 6px 26px !important; scrollbar-width:none; }
+.choice-list::-webkit-scrollbar { display:none; }
+.choice-list .choice-card { flex:0 0 clamp(230px,31.5%,300px); scroll-snap-align:start; }
+.slider-btn { position:absolute; top:32%; z-index:5; width:44px; height:44px; border-radius:50%; border:1px solid #d9cfc2; background:#fffdf9; color:#5a4030; font-size:24px; line-height:1; padding:0; cursor:pointer; box-shadow:0 6px 16px rgba(63,45,32,.14); display:flex; align-items:center; justify-content:center; transition:opacity .2s; }
+.slider-btn:hover { background:#5a4030; color:#fff; }
+.slider-btn.prev { left:-16px; }
+.slider-btn.next { right:-16px; }
+.slider-btn:disabled { opacity:0; pointer-events:none; }
+.slider-dots { display:flex; justify-content:center; gap:8px; margin-top:2px; }
+.slider-dots button { width:8px; height:8px; padding:0; border:0; border-radius:999px; background:#d9cfc2; cursor:pointer; transition:width .25s, background .25s; }
+.slider-dots button.active { width:26px; background:#5a4030; }
+
+/* ================= Cash instructions & "what happens next" ================= */
+.pay-steps { list-style:none; counter-reset:s; margin:0 0 20px; padding:0; display:grid; gap:16px; }
+.pay-steps li { counter-increment:s; position:relative; padding-left:44px; display:grid; gap:2px; }
+.pay-steps li::before, .next-box li::before { content:counter(s); position:absolute; left:0; top:0; width:30px; height:30px; border-radius:50%; background:#f1e8dc; color:#5a4030; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:600; }
+.pay-steps li strong, .next-box li strong { font-size:14px; color:#3f2d20; }
+.pay-steps li span, .next-box li span { font-size:13px; line-height:1.55; color:#7a6a5c; }
+.pay-where { display:grid; gap:10px; padding:16px 18px; background:#f6f0e7; border-radius:14px; margin-bottom:16px; }
+.pay-where div { display:flex; justify-content:space-between; gap:16px; font-size:13px; }
+.pay-where span { color:#8b7a6a; white-space:nowrap; }
+.pay-where strong { text-align:right; font-weight:600; }
+.next-box { border:1px solid #e4d9cb; border-radius:20px; background:#fffdf9; padding:22px 24px; margin-bottom:24px; }
+.next-box h4 { margin:0 0 16px; font-size:16px; }
+.next-box ol { list-style:none; counter-reset:s; margin:0; padding:0; display:grid; gap:16px; }
+.next-box li { counter-increment:s; position:relative; padding-left:44px; display:grid; gap:2px; }
+
+/* ---------- Yes / No confirmation dialog ---------- */
+dialog.cf { border:0; border-radius:24px; padding:0; width:min(420px,92vw); background:#fffdf9; color:#3f2d20; box-shadow:0 30px 80px rgba(63,45,32,.35); }
+dialog.cf::backdrop { background:rgba(63,45,32,.55); }
+.cf-body { padding:32px 30px 6px; text-align:center; }
+.cf-body h3 { margin:0 0 8px; font-family:"Cormorant Garamond", Georgia, serif; font-size:28px; font-weight:600; }
+.cf-body p { margin:0; font-size:14.5px; line-height:1.6; color:#7a6a5c; }
+.cf-foot { display:flex; gap:10px; justify-content:center; padding:22px 30px 28px; }
+.cf-no, .cf-yes { min-width:120px; padding:12px 26px; border-radius:999px; font:inherit; font-size:14px; cursor:pointer; border:1px solid #5a4030; }
+.cf-no { background:transparent; color:#5a4030; }
+.cf-no:hover { background:#f3ebdf; }
+.cf-yes { background:#5a4030; color:#fff; }
+.cf-yes:hover { background:#46301f; }
 </style>
 </head>
 
 <body class="booking-page">
 
+<?php if (!$preview): ?>
 <header class="site-header">
     <a class="brand" href="index.php">
         <span class="brand-mark">✦</span>
         <span>BELLA VISTA <small>OASIS SPA</small></span>
     </a>
     <nav class="nav-links">
+        <a href="track.php">Track my booking</a>
         <a href="index.php">← Back to website</a>
     </nav>
 </header>
+<?php endif; ?>
 
 <main class="booking-layout">
 
@@ -567,22 +688,30 @@ label .field-error, .field-error { display:block; color:#b83232 !important; font
                 <div class="step-head">
                     <h3>Choose a date &amp; time</h3>
                 </div>
-                <div class="form-grid">
-                    <label>
-                        Appointment date
-                        <input type="date" name="appointment_date" id="appointment_date" required>
-                        <small class="field-error" id="dateError"></small>
-                    </label>
-                    <div class="full">
-            <div class="group-title">Preferred time</div>
-            <div class="slot-grid" id="slotGrid"></div>
-            <small class="slot-hint" id="slotHint">Select a date to see available times.</small>
-            <small class="field-error" id="timeError"></small>
-        </div>
+                <input type="hidden" name="appointment_date" id="appointment_date">
+                <div class="dt-layout">
+                    <div class="dt-cal">
+                        <div class="cal-head">
+                            <button type="button" class="cal-nav" id="calPrev" aria-label="Previous month">‹</button>
+                            <strong id="calTitle"></strong>
+                            <button type="button" class="cal-nav" id="calNext" aria-label="Next month">›</button>
+                        </div>
+                        <div class="cal-week"><span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span></div>
+                        <div class="cal-days" id="calDays"></div>
+                        <small class="cal-note">Closed on Mondays</small>
+                    </div>
+                    <div class="dt-times">
+                        <div class="dt-selected" id="dtSelected">Select a date</div>
+                        <div id="slotGrid"></div>
+                        <small class="slot-hint" id="slotHint">Choose a date to see available times.</small>
+                    </div>
                 </div>
+                <small class="field-error" id="dateError"></small>
+                <small class="field-error" id="timeError"></small>
             </div>
 
-            <!-- STEP 3 -->
+            
+<!-- STEP 3 -->
             <div class="step-panel" data-step="3">
                 <div class="step-head">
                     <h3>Your details</h3>
@@ -658,7 +787,18 @@ label .field-error, .field-error { display:block; color:#b83232 !important; font
 
                     <!-- Cash -->
                     <div class="pay-detail" data-method="cash" hidden>
-                        <p class="pay-text-block"><?= e($paymentMethods['cash']['note']) ?></p>
+                        <div class="pay-sub">How to pay your down payment</div>
+                        <ol class="pay-steps">
+                            <li><strong>Submit your request</strong><span>You will receive a booking code right away. Keep it handy.</span></li>
+                            <li><strong>Pay at the spa front desk within <?= (int)HOLD_HOURS ?> hours</strong><span>Give your booking code and pay the <span class="js-due">₱0.00</span> down payment in cash. You will receive an official receipt.</span></li>
+                            <li><strong>Get your confirmation</strong><span>Once the front desk records your payment, your booking is confirmed. You can check its status anytime on the Track my booking page.</span></li>
+                        </ol>
+                        <div class="pay-where">
+                            <div><span>Where</span><strong><?= e($spaInfo['address']) ?></strong></div>
+                            <div><span>Front desk hours</span><strong><?= e($spaInfo['hours']) ?></strong></div>
+                            <div><span>Questions</span><strong><?= e($spaInfo['phone']) ?></strong></div>
+                        </div>
+                        <p class="pay-text-block">Reservations without a payment after <?= (int)HOLD_HOURS ?> hours are released automatically so the time slot can be booked by someone else.</p>
                     </div>
 
                     <!-- E-wallet / Online banking -->
@@ -744,7 +884,17 @@ label .field-error, .field-error { display:block; color:#b83232 !important; font
                 </div>
                 <dl class="review-box" id="reviewBox"></dl>
 
-                <div class="policy-box">
+                <div class="next-box">
+                    <h4>What happens next</h4>
+                    <ol>
+                        <li><strong>Pay your down payment</strong><span id="nextPay"></span></li>
+                        <li><strong>We verify and confirm</strong><span>Your booking turns Confirmed once the down payment is verified.</span></li>
+                        <li><strong>Track your booking</strong><span>Use your booking code on the Track my booking page to see its status anytime.</span></li>
+                    </ol>
+                </div>
+
+                
+<div class="policy-box">
                     <h4>Booking policies</h4>
                     <ul>
                         <?php foreach ($policies as $pol): ?>
@@ -798,6 +948,14 @@ label .field-error, .field-error { display:block; color:#b83232 !important; font
 <footer class="footer compact-footer">
     <small>© <?= date('Y') ?> Bella Vista Oasis Spa</small>
 </footer>
+
+<dialog id="confirmDialog" class="cf">
+    <div class="cf-body"><h3 id="cfTitle">Please confirm</h3><p id="cfText"></p></div>
+    <div class="cf-foot">
+        <button type="button" class="cf-no" id="cfNo">No</button>
+        <button type="button" class="cf-yes" id="cfYes">Yes</button>
+    </div>
+</dialog>
 
 <script src="assets/script.js"></script>
 
@@ -914,44 +1072,95 @@ function fmtTime(t) {
     return ((h % 12) || 12) + ':' + String(m).padStart(2, '0') + ' ' + (h >= 12 ? 'PM' : 'AM');
 }
 
+const dtSelected = document.getElementById('dtSelected');
+
 async function loadSlots() {
     const date = dateInput.value;
     slotGrid.innerHTML = '';
     showError(null, 'timeError', '');
 
     if (!date || date < todayStr() || new Date(date + 'T00:00:00').getDay() === 1) {
-        slotHint.textContent = date ? 'Please choose a valid date (the spa is closed on Mondays).' : 'Choose a date to see available times.';
+        dtSelected.textContent = 'Select a date';
+        slotHint.textContent = 'Choose a date to see available times.';
         return;
     }
+    dtSelected.textContent = new Date(date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 
-    let booked = [];
+    let booked = [], verified = true;
     try {
-        const res = await fetch('check_slots.php?date=' + encodeURIComponent(date));
-        const data = await res.json();
-        booked = data.booked || [];
-        slotHint.textContent = '';
+        const res = await fetch('book.php?slots=' + encodeURIComponent(date), { cache: 'no-store' });
+        if (!res.ok) throw new Error('status ' + res.status);
+        booked = (await res.json()).booked || [];
     } catch (err) {
-        slotHint.textContent = 'Could not check availability right now. Please try again.';
+        verified = false;
     }
+    slotHint.textContent = verified
+        ? 'Greyed-out times are already booked.'
+        : 'We could not verify availability right now. The spa will confirm your time after you submit.';
 
     const now = new Date();
-    SLOTS.forEach(t => {
-        let state = 'available', label = 'Available';
-        if (booked.includes(t)) { state = 'booked'; label = 'Booked'; }
-        else if (date === todayStr()) {
-            const [h, m] = t.split(':').map(Number);
-            if (h * 60 + m <= now.getHours() * 60 + now.getMinutes()) { state = 'passed'; label = 'Time passed'; }
-        }
-        const disabled = state !== 'available' ? 'disabled' : '';
-        slotGrid.insertAdjacentHTML('beforeend',
-            `<label class="slot ${state}">
-                <input type="radio" name="appointment_time" value="${t}" ${disabled}>
-                <span><b>${fmtTime(t)}</b><em>${label}</em></span>
-             </label>`);
+    const groups = { Morning: [], Afternoon: [] };
+    SLOTS.forEach(t => (parseInt(t, 10) < 12 ? groups.Morning : groups.Afternoon).push(t));
+    Object.entries(groups).forEach(([title, list]) => {
+        let html = '<div class="slot-group-title">' + title + '</div><div class="slot-row">';
+        list.forEach(t => {
+            let state = 'available', label = '';
+            if (booked.includes(t)) { state = 'booked'; label = 'Booked'; }
+            else if (date === todayStr()) {
+                const [h, m] = t.split(':').map(Number);
+                if (h * 60 + m <= now.getHours() * 60 + now.getMinutes()) { state = 'passed'; label = 'Passed'; }
+            }
+            html += '<label class="tslot is-' + state + '"><input type="radio" name="appointment_time" value="' + t + '"' +
+                    (state !== 'available' ? ' disabled' : '') + '><span>' + fmtTime(t) + (label ? '<em>' + label + '</em>' : '') + '</span></label>';
+        });
+        slotGrid.insertAdjacentHTML('beforeend', html + '</div>');
     });
 }
 dateInput.addEventListener('change', () => { validateDate(true); loadSlots().then(updateSummary); updateSummary(); });
 slotGrid.addEventListener('change', updateSummary);
+
+/* ---------- Calendar ---------- */
+const calDays = document.getElementById('calDays');
+const calTitle = document.getElementById('calTitle');
+const calPrev = document.getElementById('calPrev');
+const calNext = document.getElementById('calNext');
+const MAX_MONTHS_AHEAD = 6;
+const calView = new Date();
+calView.setDate(1);
+const pad2 = n => String(n).padStart(2, '0');
+
+function renderCalendar() {
+    const y = calView.getFullYear(), m = calView.getMonth();
+    calTitle.textContent = calView.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    const first = new Date(y, m, 1).getDay();
+    const days = new Date(y, m + 1, 0).getDate();
+    const today = todayStr(), sel = dateInput.value;
+    let html = '';
+    for (let i = 0; i < first; i++) html += '<span></span>';
+    for (let d = 1; d <= days; d++) {
+        const ds = y + '-' + pad2(m + 1) + '-' + pad2(d);
+        const closed = new Date(y, m, d).getDay() === 1;
+        const disabled = ds < today || closed;
+        html += '<button type="button" class="cal-day' + (ds === today ? ' today' : '') + (ds === sel ? ' selected' : '') +
+                '" data-date="' + ds + '"' + (disabled ? ' disabled' : '') + '>' + d + '</button>';
+    }
+    calDays.innerHTML = html;
+    const now = new Date();
+    const diff = (y - now.getFullYear()) * 12 + m - now.getMonth();
+    calPrev.disabled = diff <= 0;
+    calNext.disabled = diff >= MAX_MONTHS_AHEAD;
+}
+calDays.addEventListener('click', e => {
+    const b = e.target.closest('.cal-day');
+    if (!b || b.disabled) return;
+    dateInput.value = b.dataset.date;
+    dateInput.dispatchEvent(new Event('change'));
+    renderCalendar();
+});
+calPrev.addEventListener('click', () => { calView.setMonth(calView.getMonth() - 1); renderCalendar(); });
+calNext.addEventListener('click', () => { calView.setMonth(calView.getMonth() + 1); renderCalendar(); });
+renderCalendar();
+
 
 /* Services / packages + detailed breakdown */
 const choiceInputs = () => Array.from(document.querySelectorAll('.choice-card input'));
@@ -1073,7 +1282,7 @@ function updatePayment() {
     });
 
     const notes = {
-        cash: 'Reserve your slot with a ' + pct + '% down payment (' + peso(due) + '). The remaining ' + peso(balance) + ' is paid in cash at the spa.',
+        cash: 'Reserve your slot with a ' + pct + '% down payment (' + peso(due) + '), paid in cash at the spa front desk within <?= (int)HOLD_HOURS ?> hours. The remaining ' + peso(balance) + ' is paid at the spa.',
         ewallet: 'Send ' + peso(due) + ' (' + pct + '% reservation fee) with your chosen e-wallet, then enter the reference number.',
         bank: 'Transfer ' + peso(due) + ' (' + pct + '% reservation fee) to your chosen bank, then enter the reference number.'
     };
@@ -1166,6 +1375,80 @@ document.querySelectorAll('.choice-tab').forEach(tab => {
 guestsInput.addEventListener('change', updateSummary);
 updateSummary();
 
+
+/* ---------- Treatment slider (arrows, dots, swipe) ---------- */
+function initSliders() {
+    document.querySelectorAll('.choice-list').forEach(list => {
+        if (list.dataset.slider) return;
+        list.dataset.slider = '1';
+        const wrap = document.createElement('div');
+        wrap.className = 'slider';
+        list.parentNode.insertBefore(wrap, list);
+        wrap.appendChild(list);
+
+        const prev = document.createElement('button');
+        prev.type = 'button'; prev.className = 'slider-btn prev'; prev.setAttribute('aria-label', 'Previous'); prev.innerHTML = '&#8249;';
+        const next = document.createElement('button');
+        next.type = 'button'; next.className = 'slider-btn next'; next.setAttribute('aria-label', 'Next'); next.innerHTML = '&#8250;';
+        const dots = document.createElement('div');
+        dots.className = 'slider-dots';
+        wrap.append(prev, next, dots);
+
+        const pages = () => Math.max(1, Math.ceil((list.scrollWidth - 8) / Math.max(list.clientWidth, 1)));
+        const current = () => Math.min(pages() - 1, Math.round(list.scrollLeft / Math.max(list.clientWidth, 1)));
+        const update = () => {
+            if (!list.clientWidth) return;
+            const n = pages();
+            if (dots.children.length !== n) {
+                dots.innerHTML = '';
+                for (let i = 0; i < n; i++) {
+                    const b = document.createElement('button');
+                    b.type = 'button'; b.setAttribute('aria-label', 'Go to slide ' + (i + 1));
+                    b.addEventListener('click', () => list.scrollTo({ left: i * list.clientWidth, behavior: 'smooth' }));
+                    dots.appendChild(b);
+                }
+            }
+            Array.from(dots.children).forEach((b, i) => b.classList.toggle('active', i === current()));
+            prev.disabled = list.scrollLeft <= 4;
+            next.disabled = list.scrollLeft + list.clientWidth >= list.scrollWidth - 4;
+            dots.style.display = n > 1 ? 'flex' : 'none';
+        };
+        const stepBy = () => {
+            const c = list.querySelector('.choice-card');
+            return c ? c.getBoundingClientRect().width + 20 : list.clientWidth * 0.8;
+        };
+        prev.addEventListener('click', () => list.scrollBy({ left: -stepBy(), behavior: 'smooth' }));
+        next.addEventListener('click', () => list.scrollBy({ left: stepBy(), behavior: 'smooth' }));
+        list.addEventListener('scroll', () => requestAnimationFrame(update), { passive: true });
+        window.addEventListener('resize', update);
+        list.updateSlider = update;
+        update();
+    });
+}
+function refreshSliders() { document.querySelectorAll('.choice-list').forEach(l => l.updateSlider && l.updateSlider()); }
+initSliders();
+document.querySelectorAll('.choice-tab').forEach(t => t.addEventListener('click', () => setTimeout(refreshSliders, 40)));
+window.addEventListener('load', refreshSliders);
+
+/* ---------- Yes / No confirmation ---------- */
+function askConfirm(title, message, yesLabel, noLabel) {
+    return new Promise(resolve => {
+        const d = document.getElementById('confirmDialog');
+        const yes = document.getElementById('cfYes'), no = document.getElementById('cfNo');
+        document.getElementById('cfTitle').textContent = title;
+        document.getElementById('cfText').textContent = message;
+        yes.textContent = yesLabel || 'Yes';
+        no.textContent = noLabel || 'No';
+        let result = false;
+        yes.onclick = () => { result = true; d.close(); };
+        no.onclick = () => d.close();
+        const done = () => { d.removeEventListener('close', done); resolve(result); };
+        d.addEventListener('close', done);
+        d.showModal();
+        no.focus();
+    });
+}
+
 /* ---------- Step wizard ---------- */
 let currentStep = 1;
 const TOTAL_STEPS = 5;
@@ -1175,6 +1458,9 @@ const backBtn = document.getElementById('backBtn');
 const nextBtn = document.getElementById('nextBtn');
 
 function fillReview() {
+    document.getElementById('nextPay').textContent = getMethod() === 'cash'
+        ? 'Pay the down payment in cash at the spa front desk within <?= (int)HOLD_HOURS ?> hours.'
+        : 'Our team will verify your payment and reference number.';
     const rows = [
         ['Name', nameInput.value.trim()],
         ['Email', emailInput.value.trim()],
@@ -1240,25 +1526,62 @@ stepperItems.forEach(li => li.addEventListener('click', () => {
     goStep(k);
 }));
 
-/* Enter key moves to the next step instead of submitting early */
-bookingForm.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA' && e.target.type !== 'submit' && currentStep < TOTAL_STEPS) {
-        e.preventDefault();
-        nextBtn.click();
+/* Enter key: check this field, jump to the next field that still needs input,
+   and go to the next step only when everything on this step is valid. */
+const silentOk = f => {
+    const v = f.value.trim();
+    switch (f.id) {
+        case 'customer_name': return /^[A-Za-z\u00C0-\u00FF][A-Za-z\u00C0-\u00FF\s.'-]*$/.test(v);
+        case 'email': return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v);
+        case 'phone': return /^(09\d{9}|639\d{9})$/.test(f.value);
+        case 'reference_no': return /^[A-Za-z0-9-]{6,25}$/.test(v);
+        default: return true;
     }
+};
+const loudCheck = f => {
+    switch (f.id) {
+        case 'customer_name': return validateName(true);
+        case 'email': return validateEmail(true);
+        case 'phone': return validatePhone(true);
+        case 'reference_no': return validateRef(true);
+        default: return true;
+    }
+};
+bookingForm.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    const t = e.target;
+    if (t.tagName === 'TEXTAREA' || t.tagName === 'BUTTON' || t.type === 'submit') return;
+    e.preventDefault();
+    if (currentStep >= TOTAL_STEPS) return;           // never submit by accident on the last step
+
+    const panel = document.querySelector('.step-panel.active');
+    const fields = Array.from(panel.querySelectorAll('input, select')).filter(f =>
+        !f.disabled && f.offsetParent !== null && !['hidden', 'radio', 'checkbox', 'file', 'button', 'submit'].includes(f.type));
+    const idx = fields.indexOf(t);
+    if (idx === -1) { nextBtn.click(); return; }
+    if (!loudCheck(t)) return;                        // stay here and show the error
+
+    const pending = fields.slice(idx + 1).concat(fields.slice(0, idx)).find(f => !silentOk(f));
+    if (pending) { pending.focus(); return; }
+    nextBtn.click();
 });
 
 document.getElementById('terms').addEventListener('change', e => showError(null, 'termsError', e.target.checked ? '' : 'Please confirm the booking guidelines.'));
 
 /* Submit: re-check every step, then the confirmation checkbox */
 bookingForm.addEventListener('submit', function(event) {
+    if (bookingForm.dataset.ok === '1') return;       // already confirmed by the customer
     for (let i = 1; i <= 4; i++) {
         if (!stepValid(i)) { event.preventDefault(); goStep(i); return; }
     }
     if (!document.getElementById('terms').checked) {
         event.preventDefault();
         showError(null, 'termsError', 'Please confirm the booking guidelines.');
+        return;
     }
+    event.preventDefault();
+    askConfirm('Submit your request?', 'Please make sure your details are correct. Your booking request will be sent to the spa.', 'Yes, submit', 'No, go back')
+        .then(ok => { if (ok) { bookingForm.dataset.ok = '1'; bookingForm.requestSubmit(); } });
 });
 </script>
 
