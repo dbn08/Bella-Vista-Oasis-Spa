@@ -1,9 +1,26 @@
 <?php
 require_once 'config.php';
 
-/* ---------- Access control ---------- */
+/* ---------- Access control: sign in, sign out and the dashboard all live in this file ---------- */
 if (empty($_SESSION['admin_id'])) {
-    header('Location: admin_login.php');
+    $loginError = '';
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['op'] ?? '') === 'login') {
+        $st = $pdo->prepare('SELECT id, username, password_hash FROM admins WHERE username = ?');
+        $st->execute([trim($_POST['username'] ?? '')]);
+        $admin = $st->fetch();
+        if ($admin && password_verify((string)($_POST['password'] ?? ''), $admin['password_hash'])) {
+            session_regenerate_id(true);
+            $_SESSION['admin_id'] = (int)$admin['id'];
+            $_SESSION['admin_username'] = $admin['username'];
+            header('Location: admin_dashboard.php');
+            exit;
+        }
+        usleep(400000);                                   // slow down password guessing
+        $loginError = 'Invalid username or password.';
+    }
+    $loginNotice = $_SESSION['flash'] ?? null;
+    unset($_SESSION['flash']);
+    bv_render_login($loginError, $loginNotice);
     exit;
 }
 $adminName = $_SESSION['admin_username'] ?? 'admin';
@@ -34,6 +51,51 @@ function bv_back(string $qs): void {
     header('Location: admin_dashboard.php' . ($qs !== '' ? '?' . $qs : ''));
     exit;
 }
+
+/* Sign-in screen (shown instead of the dashboard when nobody is logged in) */
+function bv_render_login(string $error, ?array $notice): void { ?>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin sign in | Bella Vista Oasis Spa</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Jost:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+* { box-sizing:border-box; }
+body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px;
+       background:linear-gradient(160deg,#f7f1e8,#eadcc8); font-family:"Jost",system-ui,sans-serif; color:#3f2d20; }
+.box { width:min(420px,100%); background:#fffdf9; border:1px solid #e8dccb; border-radius:28px; padding:40px 36px; box-shadow:0 24px 60px rgba(63,45,32,.14); }
+.mark { width:54px; height:54px; margin:0 auto 14px; border-radius:50%; border:1px solid #cdbfae; display:flex; align-items:center; justify-content:center; color:#b58a52; font-size:22px; }
+h1 { margin:0; text-align:center; font-family:"Cormorant Garamond",Georgia,serif; font-weight:600; font-size:30px; letter-spacing:.18em; }
+.sub { text-align:center; font-size:12px; letter-spacing:.3em; color:#6f5f52; margin:4px 0 28px; }
+label { display:block; font-size:13px; font-weight:500; margin-bottom:16px; }
+input { width:100%; margin-top:6px; font:inherit; padding:13px 18px; border:1px solid #e8dccb; border-radius:999px; background:#fff; color:#3f2d20; }
+input:focus { outline:2px solid rgba(100,133,104,.35); border-color:#648568; }
+button { width:100%; height:44px; margin-top:8px; font:inherit; font-size:13px; font-weight:600; letter-spacing:.12em; text-transform:uppercase; border:0; border-radius:999px; background:#5a4030; color:#fff; cursor:pointer; }
+button:hover { background:#46301f; }
+.msg { padding:11px 16px; border-radius:14px; font-size:14px; margin-bottom:18px; }
+.msg.err { background:#fbeceb; color:#b83232; border:1px solid #f0c9c6; }
+.msg.ok { background:#eaf1e8; color:#3f6644; border:1px solid #cfe0cc; }
+.back { display:block; text-align:center; margin-top:20px; font-size:13px; color:#6f5f52; text-decoration:none; }
+</style>
+</head>
+<body>
+<form class="box" method="post" autocomplete="off">
+    <div class="mark">✦</div>
+    <h1>BELLA VISTA</h1>
+    <div class="sub">OASIS SPA · ADMIN</div>
+    <?php if ($notice): ?><div class="msg <?= $notice[0] === 'success' ? 'ok' : 'err' ?>"><?= bv_h($notice[1]) ?></div><?php endif; ?>
+    <?php if ($error): ?><div class="msg err"><?= bv_h($error) ?></div><?php endif; ?>
+    <input type="hidden" name="op" value="login">
+    <label>Username<input type="text" name="username" required autofocus></label>
+    <label>Password<input type="password" name="password" required></label>
+    <button type="submit">Sign in</button>
+    <a class="back" href="index.php">← Back to website</a>
+</form>
+</body>
+</html>
+<?php }
 
 function bv_stats(PDO $pdo): array {
     $r = $pdo->query("SELECT COUNT(*) AS total,
@@ -146,6 +208,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         bv_back($back);
     }
     $op = $_POST['op'] ?? '';
+
+    if ($op === 'logout') {
+        unset($_SESSION['admin_id'], $_SESSION['admin_username'], $_SESSION['csrf']);
+        session_regenerate_id(true);
+        bv_flash('success', 'You have been logged out.');
+        header('Location: admin_dashboard.php');
+        exit;
+    }
 
     try {
         /* ----- quick status changes ----- */
@@ -370,6 +440,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             bv_back($back);
         }
 
+        /* ----- admin accounts ----- */
+        if ($op === 'save_admin') {
+            $id       = (int)($_POST['admin_id'] ?? 0);
+            $username = trim($_POST['admin_username'] ?? '');
+            $password = (string)($_POST['admin_password'] ?? '');
+            $confirm  = (string)($_POST['admin_password_confirm'] ?? '');
+
+            $err = '';
+            if (!$id && !preg_match('/^[A-Za-z0-9_.-]{3,50}$/', $username)) $err = 'Username must be 3–50 characters (letters, numbers, . _ -).';
+            elseif (strlen($password) < 8) $err = 'Password must be at least 8 characters.';
+            elseif ($password !== $confirm) $err = 'The two passwords do not match.';
+            if ($err === '' && !$id) {
+                $dup = $pdo->prepare('SELECT COUNT(*) FROM admins WHERE username = ?');
+                $dup->execute([$username]);
+                if ((int)$dup->fetchColumn() > 0) $err = 'That username is already taken.';
+            }
+            if ($err !== '') { bv_flash('error', $err); bv_back($back); }
+
+            $hash = password_hash($password, PASSWORD_DEFAULT);
+            if ($id) {
+                $pdo->prepare('UPDATE admins SET password_hash = ? WHERE id = ?')->execute([$hash, $id]);
+                bv_flash('success', 'Password updated.');
+            } else {
+                $pdo->prepare('INSERT INTO admins (username, password_hash) VALUES (?, ?)')->execute([$username, $hash]);
+                bv_flash('success', 'Admin "' . $username . '" added.');
+            }
+            bv_back($back);
+        }
+
+        if ($op === 'delete_admin') {
+            $id = (int)($_POST['admin_id'] ?? 0);
+            if ($id === (int)$_SESSION['admin_id']) {
+                bv_flash('error', 'You cannot delete the account you are signed in with.');
+            } elseif ((int)$pdo->query('SELECT COUNT(*) FROM admins')->fetchColumn() <= 1) {
+                bv_flash('error', 'At least one admin must remain.');
+            } else {
+                $pdo->prepare('DELETE FROM admins WHERE id = ?')->execute([$id]);
+                bv_flash('success', 'Admin deleted.');
+            }
+            bv_back($back);
+        }
+
         if ($op === 'toggle_item' || $op === 'delete_item') {
             $kind = $_POST['kind'] ?? '';
             $id = (int)($_POST['item_id'] ?? 0);
@@ -403,7 +515,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 /* ---------- Page data ---------- */
-$tab = in_array($_GET['tab'] ?? '', ['overview', 'appointments', 'services', 'packages', 'preview'], true) ? $_GET['tab'] : 'overview';
+$tab = in_array($_GET['tab'] ?? '', ['overview', 'appointments', 'services', 'packages', 'admins', 'preview'], true) ? $_GET['tab'] : 'overview';
 $flash = $_SESSION['flash'] ?? null;
 unset($_SESSION['flash']);
 
@@ -415,6 +527,12 @@ try {
 } catch (PDOException $e) {
     $packages = [];
     $hasPackages = false;
+}
+
+/* Admin accounts */
+$admins = [];
+if ($tab === 'admins') {
+    $admins = $pdo->query('SELECT id, username, created_at FROM admins ORDER BY id')->fetchAll();
 }
 
 /* Overview lists */
@@ -627,7 +745,7 @@ dialog::backdrop { background:rgba(63,45,32,.55); }
 .fgrid { display:grid; grid-template-columns:1fr 1fr; gap:16px 18px; }
 .fgrid .full { grid-column:1 / -1; }
 .fgrid label { display:block; font-size:13px; font-weight:500; }
-.fgrid input[type=text], .fgrid input[type=email], .fgrid input[type=tel], .fgrid input[type=date], .fgrid input[type=number], .fgrid input[type=file], .fgrid select, .fgrid textarea {
+.fgrid input[type=text], .fgrid input[type=password], .fgrid input[type=email], .fgrid input[type=tel], .fgrid input[type=date], .fgrid input[type=number], .fgrid input[type=file], .fgrid select, .fgrid textarea {
     width:100%; margin-top:6px; font:inherit; font-size:14px; padding:11px 16px; border:1px solid var(--line); border-radius:14px; background:#fff; color:var(--ink); }
 .fgrid textarea { resize:vertical; min-height:80px; }
 .fgrid input:focus, .fgrid select:focus, .fgrid textarea:focus { outline:2px solid rgba(100,133,104,.35); border-color:var(--green); }
@@ -667,7 +785,9 @@ dialog.cf::backdrop { background:rgba(63,45,32,.55); }
 
 dialog.cf { width:min(440px,92vw); }
 .cf-body h3 { font-family:var(--serif); }
-.preview-frame { display:block; width:100%; height:calc(100vh - 230px); min-height:640px; border:1px solid var(--line); border-radius:22px; background:#fff; }
+.wrap-full { max-width:none; padding:0; }
+.wrap-full .toast { margin:14px 24px; }
+.preview-frame { display:block; width:100%; height:calc(100vh - var(--topbar-h, 86px)); min-height:560px; border:0; background:#fff; }
 </style>
 </head>
 <body>
@@ -683,16 +803,21 @@ dialog.cf { width:min(440px,92vw); }
             <a href="?tab=appointments" class="<?= $tab === 'appointments' ? 'active' : '' ?>">Appointments</a>
             <a href="?tab=services" class="<?= $tab === 'services' ? 'active' : '' ?>">Treatments</a>
             <a href="?tab=packages" class="<?= $tab === 'packages' ? 'active' : '' ?>">Packages</a>
+            <a href="?tab=admins" class="<?= $tab === 'admins' ? 'active' : '' ?>">Admins</a>
             <a href="?tab=preview" class="<?= $tab === 'preview' ? 'active' : '' ?>">Booking page</a>
         </nav>
         <div class="top-actions">
             <span><?= bv_h($adminName) ?></span>
-            <a class="btn btn-sm btn-ghost" href="admin_logout.php" data-logout>Log out</a>
+            <form method="post" class="inline">
+                <input type="hidden" name="csrf" value="<?= bv_h($csrf) ?>"><input type="hidden" name="back" value="tab=overview">
+                <input type="hidden" name="op" value="logout">
+                <button class="btn btn-sm btn-ghost">Log out</button>
+            </form>
         </div>
     </div>
 </header>
 
-<main class="wrap">
+<main class="wrap<?= $tab === 'preview' ? ' wrap-full' : '' ?>">
 <?php if ($flash): ?>
     <div class="toast <?= bv_h($flash[0]) ?>"><span><?= bv_h($flash[1]) ?></span></div>
 <?php endif; ?>
@@ -858,15 +983,40 @@ dialog.cf { width:min(440px,92vw); }
     <?php endif; ?>
 
 <?php elseif ($tab === 'preview'): ?>
+    <iframe class="preview-frame" src="book.php?preview=1" title="Booking page"></iframe>
+
+<?php elseif ($tab === 'admins'): ?>
     <div class="page-head">
         <div>
-            <div class="eyebrow">Customer view</div>
-            <h1>Booking page</h1>
-            <p>This is exactly what your customers see. Bookings made here are real.</p>
+            <div class="eyebrow">Access</div>
+            <h1>Admins</h1>
+            <p><?= count($admins) ?> account<?= count($admins) === 1 ? '' : 's' ?> can sign in to this dashboard</p>
         </div>
-        <a class="btn btn-sm" href="book.php" target="_blank">Open in a new tab ↗</a>
+        <button class="btn" type="button" data-new-admin>+ Add admin</button>
     </div>
-    <iframe class="preview-frame" src="book.php?preview=1" title="Booking page preview"></iframe>
+    <div class="card table-card"><div class="table-wrap">
+    <table class="tbl" style="min-width:520px">
+        <thead><tr><th>Username</th><th>Created</th><th class="right">Actions</th></tr></thead>
+        <tbody>
+        <?php foreach ($admins as $ad): $isMe = (int)$ad['id'] === (int)$_SESSION['admin_id']; ?>
+            <tr>
+                <td><strong><?= bv_h($ad['username']) ?></strong><?= $isMe ? ' <span class="badge b-confirmed">You</span>' : '' ?></td>
+                <td><?= $ad['created_at'] ? bv_h(date('M j, Y', strtotime($ad['created_at']))) : '—' ?></td>
+                <td class="right"><div class="actions">
+                    <button type="button" class="btn btn-sm" data-admin="<?= bv_h(json_encode(['id' => (int)$ad['id'], 'username' => $ad['username']])) ?>">Reset password</button>
+                    <?php if (!$isMe): ?>
+                    <form method="post" class="inline">
+                        <input type="hidden" name="csrf" value="<?= bv_h($csrf) ?>"><input type="hidden" name="back" value="<?= bv_h($backQs) ?>">
+                        <input type="hidden" name="op" value="delete_admin"><input type="hidden" name="admin_id" value="<?= (int)$ad['id'] ?>">
+                        <button class="btn btn-sm btn-danger">Delete</button>
+                    </form>
+                    <?php endif; ?>
+                </div></td>
+            </tr>
+        <?php endforeach; ?>
+        </tbody>
+    </table>
+    </div></div>
 
 <?php elseif ($tab === 'services'): ?>
     <div class="page-head">
@@ -994,6 +1144,27 @@ dialog.cf { width:min(440px,92vw); }
         <button type="button" class="cf-no" id="cfNo">No</button>
         <button type="button" class="cf-yes" id="cfYes">Yes</button>
     </div>
+</dialog>
+
+<!-- ===== Admin account dialog ===== -->
+<dialog id="adminDialog">
+<form method="post" id="adminForm" autocomplete="off">
+    <input type="hidden" name="csrf" value="<?= bv_h($csrf) ?>">
+    <input type="hidden" name="back" value="<?= bv_h($backQs) ?>">
+    <input type="hidden" name="op" value="save_admin">
+    <input type="hidden" name="admin_id" value="">
+    <div class="dlg-head"><h3 id="adminTitle">Add admin</h3><button type="button" class="dlg-x" data-close>&times;</button></div>
+    <div class="dlg-body"><div class="fgrid">
+        <label class="full">Username<input type="text" name="admin_username" maxlength="50" autocomplete="off"></label>
+        <label>Password<input type="password" name="admin_password" required minlength="8" autocomplete="new-password"></label>
+        <label>Confirm password<input type="password" name="admin_password_confirm" required minlength="8" autocomplete="new-password"></label>
+        <div class="full hint">At least 8 characters. Usernames can use letters, numbers, . _ and -</div>
+    </div></div>
+    <div class="dlg-foot">
+        <button type="button" class="btn btn-light" data-close>Cancel</button>
+        <button type="submit" class="btn">Save</button>
+    </div>
+</form>
 </dialog>
 
 <script>
@@ -1136,7 +1307,9 @@ const CONFIRMS = {
     delete_appointment: ['Delete this booking?', 'This will permanently remove the booking and cannot be undone.', 'Yes, delete'],
     delete_item:        ['Delete this item?', 'This will permanently remove it and cannot be undone.', 'Yes, delete'],
     save_appointment:   ['Save this booking?', 'The booking details, total and down payment will be updated.', 'Yes, save'],
-    save_item:          ['Save your changes?', 'The booking page will show the updated details.', 'Yes, save']
+    save_item:          ['Save your changes?', 'The booking page will show the updated details.', 'Yes, save'],
+    delete_admin:       ['Delete this admin?', 'This account will no longer be able to sign in.', 'Yes, delete'],
+    logout:             ['Log out?', 'You will need to sign in again to manage bookings.', 'Yes, log out']
 };
 document.querySelectorAll('form').forEach(f => {
     const opEl = f.querySelector('input[name="op"]');
@@ -1177,11 +1350,40 @@ document.querySelectorAll('select[data-confirm-select]').forEach(sel => {
     });
 });
 
-/* Log out */
-document.querySelectorAll('[data-logout]').forEach(l => l.addEventListener('click', async e => {
-    e.preventDefault();
-    if (await askConfirm('Log out?', 'You will need to sign in again to manage bookings.', 'Yes, log out', 'No, stay')) location.href = l.href;
-}));
+
+/* ---- admin account dialog (add / reset password) ---- */
+const adminDlg = document.getElementById('adminDialog');
+const adminForm = document.getElementById('adminForm');
+function openAdmin(account) {
+    adminForm.reset();
+    delete adminForm.dataset.ok;
+    const isReset = !!account;
+    adminForm.elements.admin_id.value = isReset ? account.id : '';
+    adminForm.elements.admin_username.value = isReset ? account.username : '';
+    adminForm.elements.admin_username.readOnly = isReset;
+    adminForm.elements.admin_username.required = !isReset;
+    document.getElementById('adminTitle').textContent = isReset ? 'Reset password' : 'Add admin';
+    adminForm.dataset.cTitle = isReset ? 'Reset password?' : 'Add this admin?';
+    adminForm.dataset.cText = isReset
+        ? 'A new password will be set for ' + account.username + '.'
+        : 'The new admin will be able to sign in and manage bookings.';
+    adminForm.dataset.cYes = isReset ? 'Yes, reset' : 'Yes, add';
+    adminDlg.showModal();
+}
+document.querySelectorAll('[data-new-admin]').forEach(b => b.addEventListener('click', () => openAdmin(null)));
+document.querySelectorAll('[data-admin]').forEach(b => b.addEventListener('click', () => openAdmin(JSON.parse(b.dataset.admin))));
+const passwordField = adminForm.elements.admin_password, repeatField = adminForm.elements.admin_password_confirm;
+const checkPasswordsMatch = () => repeatField.setCustomValidity(repeatField.value && passwordField.value !== repeatField.value ? 'The two passwords do not match.' : '');
+passwordField.addEventListener('input', checkPasswordsMatch);
+repeatField.addEventListener('input', checkPasswordsMatch);
+
+/* ---- keep the full-size booking page exactly as tall as the space under the top bar ---- */
+(function () {
+    const topBar = document.querySelector('.topbar');
+    const setHeight = () => document.documentElement.style.setProperty('--topbar-h', topBar.offsetHeight + 'px');
+    setHeight();
+    window.addEventListener('resize', setHeight);
+})();
 
 /* ---- auto-hide flash ---- */
 const t = document.querySelector('.toast');
