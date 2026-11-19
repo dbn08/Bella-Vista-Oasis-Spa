@@ -1,6 +1,6 @@
 /* Bella Vista Oasis Spa - compact stylesheet (warm earthy luxury) */
 @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap');
-:root{--cocoa:#5b4332;--cocoa-dark:#3f2e22;--taupe:#a38a6d;--sand:#e8d9c5;--sand-light:#f1e6d6;--cream:#f7efe3;--paper:#fdf9f2;--gold:#b08d57;--gold-soft:#e3cb9a;--gold-text:#86652f;--ink:#3d2f25;--muted:#6b5848;--line:#e4d5c0;--sage:#9aa58a;--sage-light:#e9e8d8;--forest:var(--cocoa);--dark:var(--cocoa-dark);--serif:'Cormorant Garamond',Georgia,serif;--sans:'Jost',Arial,sans-serif;--photo1:url('https://images.unsplash.com/photo-1544161515-4ab6ce6db874?auto=format&fit=crop&w=900&q=80');--photo2:url('https://images.unsplash.com/photo-1515377905703-c4788e51af15?auto=format&fit=crop&w=900&q=80');--photo3:url('https://images.unsplash.com/photo-1540555700478-4be289fbecef?auto=format&fit=crop&w=900&q=80')}
+:root{--cocoa:#4f6b55;--cocoa-dark:#2f4033;--taupe:#8fa392;--sand:#dbe5d6;--sand-light:#edf2e9;--cream:#f4f6ee;--paper:#fdf9f2;--gold:#b08d57;--gold-soft:#e3cb9a;--gold-text:#86652f;--ink:#2c3a30;--muted:#5d6a5f;--line:#d9e2d3;--sage:#9aa58a;--sage-light:#e4ecdf;--sage-900:#2f4033;--sage-700:#4f6b55;--sage-500:#6f8f74;--sage-200:#d9e4d6;--sage-100:#eaf0e7;--sage-50:#f4f7f2;--forest:var(--cocoa);--dark:var(--cocoa-dark);--serif:'Cormorant Garamond',Georgia,serif;--sans:'Jost',Arial,sans-serif;--photo1:url('https://images.unsplash.com/photo-1544161515-4ab6ce6db874?auto=format&fit=crop&w=900&q=80');--photo2:url('https://images.unsplash.com/photo-1515377905703-c4788e51af15?auto=format&fit=crop&w=900&q=80');--photo3:url('https://images.unsplash.com/photo-1540555700478-4be289fbecef?auto=format&fit=crop&w=900&q=80')}
 /* Base */
 *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--paper);color:var(--ink);font:400 17px/1.75 var(--sans)}a{color:inherit;text-decoration:none}h1,h2,h3,p{margin:0}img{max-width:100%}button,input,select,textarea{font:inherit}
 :focus-visible{outline:2px solid var(--gold);outline-offset:2px}.brand-mark,.service-icon,.success-icon,.menu-arrow{display:grid;place-items:center;border-radius:50%}
@@ -102,19 +102,106 @@ td{padding:13px 15px;border-bottom:1px solid var(--line)}tr:hover td{background:
 /* Hover zoom sa treatment cards */
 .service-card{transition:transform .45s cubic-bezier(.2,.65,.3,1),box-shadow .45s ease}.service-card::before{transition:transform .8s cubic-bezier(.2,.65,.3,1)}
 @media(hover:hover){.service-card:hover{transform:scale(1.03);box-shadow:0 22px 50px rgba(63,46,34,.18);z-index:2}.service-card:hover::before{transform:scale(1.08)}}
-/* Add-ons card + popup */
-.service-grid .service-card.service-card--addons::before{background-image:url('images/additional.jpg')}
-.addon-tags{list-style:none;margin:0 0 18px;padding:0;display:flex;flex-wrap:wrap;gap:8px}.addon-tags li{border:1px solid rgba(255,255,255,.45);border-radius:999px;padding:4px 14px;font-size:13px;letter-spacing:.08em;color:#fff}
-.addons-modal .modal-content{position:relative;max-width:840px;padding:0;display:grid;grid-template-columns:.75fr 1.4fr;overflow:hidden}.addons-photo{background:#b79f84 url('images/additional.jpg') center/cover;min-height:260px}.addons-body{padding:34px 34px 28px;overflow-y:auto;max-height:85vh}
-.addons-body .eyebrow{margin-bottom:6px}.addons-body h2{font:400 42px/1.1 var(--serif);color:var(--cocoa);margin:0 0 8px}.addons-intro{color:var(--muted);font-size:15px;margin-bottom:20px}
-.addon-groups{display:grid;grid-template-columns:1fr 1fr;gap:20px 28px}.addon-group h3{font:500 22px var(--serif);color:var(--cocoa);margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--line)}.addon-group ul{list-style:none;margin:0;padding:0;display:grid;gap:6px}.addon-group li{display:flex;justify-content:space-between;gap:12px;font-size:15px}.addon-group li strong{font:500 18px var(--serif);color:var(--gold-text);white-space:nowrap}
-.addons-note{font-size:13px;color:var(--muted);margin-top:20px}
-.addons-close{position:absolute;top:12px;right:14px;width:36px;height:36px;display:grid;place-items:center;border:1px solid var(--line);border-radius:50%;background:var(--paper);color:var(--cocoa);font-size:22px;line-height:1;cursor:pointer}.addons-close:hover{background:var(--cocoa);color:#fff}
-/* Footer social */
-.footer-social{width:100%;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-top:14px;padding-top:22px;border-top:1px solid rgba(255,255,255,.15)}.footer-social p{font-size:14px;letter-spacing:.16em;text-transform:uppercase;color:#efe4d3}.footer-social ul{list-style:none;display:flex;gap:12px;margin:0;padding:0}
-.footer-social a{width:44px;height:44px;display:grid;place-items:center;border:1px solid rgba(227,203,154,.5);border-radius:50%;color:var(--gold-soft);transition:background .25s,color .25s,transform .25s}.footer-social a:hover{background:var(--gold-soft);color:var(--cocoa-dark);transform:translateY(-2px)}.footer-social svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 /* Responsive */
 @media(max-width:1080px){.service-grid,.policy-grid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:980px){.intro,.booking-layout{grid-template-columns:1fr}.intro{gap:60px}.booking-aside{padding:55px 8%}.hero-stamp{display:none}}
-@media(max-width:760px){.footer-social{flex-direction:column;gap:14px}.addons-modal .modal-content{grid-template-columns:1fr;max-height:88vh;overflow-y:auto}.addons-photo{min-height:150px}.addon-groups{grid-template-columns:1fr}.addons-body{max-height:none;padding:26px 22px}.site-header{padding:0 5%}.menu-toggle{display:block}.nav-links{display:none;position:absolute;top:92px;left:0;right:0;flex-direction:column;align-items:stretch;gap:0;background:var(--paper);border-bottom:1px solid var(--line);padding:10px 5% 22px}.nav-links.open{display:flex}.nav-links a{padding:12px 0}.nav-book{text-align:center;margin-top:8px}.hero{padding:70px 6%;min-height:560px}.section{padding:75px 6%}.promise{grid-template-columns:1fr;padding:44px 6%;gap:28px}.promise>div{border-right:0;border-bottom:1px solid rgba(255,255,255,.2);padding:0 0 22px}.service-grid,.policy-grid,.form-grid,.two-inputs{grid-template-columns:1fr}.art-caption{right:6px}.intro-art{min-height:420px}.footer{flex-direction:column;text-align:center;padding:32px 6%}}
+@media(max-width:760px){.site-header{padding:0 5%}.menu-toggle{display:block}.nav-links{display:none;position:absolute;top:92px;left:0;right:0;flex-direction:column;align-items:stretch;gap:0;background:var(--paper);border-bottom:1px solid var(--line);padding:10px 5% 22px}.nav-links.open{display:flex}.nav-links a{padding:12px 0}.nav-book{text-align:center;margin-top:8px}.hero{padding:70px 6%;min-height:560px}.section{padding:75px 6%}.promise{grid-template-columns:1fr;padding:44px 6%;gap:28px}.promise>div{border-right:0;border-bottom:1px solid rgba(255,255,255,.2);padding:0 0 22px}.service-grid,.policy-grid,.form-grid,.two-inputs{grid-template-columns:1fr}.art-caption{right:6px}.intro-art{min-height:420px}.footer{flex-direction:column;text-align:center;padding:32px 6%}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.service-card,.service-card::before{transition:none}.service-card:hover,.service-card:hover::before{transform:none}.button,.service-grid.is-slider,.menu-dot{transition:none}.reveal,.hero-content>*,.hero-stamp{opacity:1;transform:none;transition:none;animation:none}}
+
+/* =========================================================
+   SAGE GREEN THEME (overrides)
+   ========================================================= */
+::selection{background:var(--sage-200);color:var(--sage-900)}
+.hero-overlay{background:linear-gradient(180deg,rgba(38,54,43,.52),rgba(47,64,51,.40) 55%,rgba(30,44,35,.68))}
+.intro-art{background:linear-gradient(rgba(47,64,51,.25),rgba(47,64,51,.50)),#9db0a0 var(--photo1) center/cover}
+.service-card::after{background:linear-gradient(180deg,rgba(24,36,28,.05) 25%,rgba(24,36,28,.55) 58%,rgba(24,36,28,.92))}
+@media(hover:hover){.service-card:hover{box-shadow:0 22px 50px rgba(47,64,51,.22)}}
+.quote-band{background:linear-gradient(rgba(34,50,39,.82),rgba(34,50,39,.82)),var(--photo2) center/cover}
+.bv-footer{background:var(--cocoa-dark)!important}
+.bv-links a:hover,.bv-social a:hover{color:var(--gold-soft)}
+.booking-aside{background:linear-gradient(rgba(34,50,39,.86),rgba(34,50,39,.86)),var(--photo1) center/cover}
+tr:hover td{background:#f3f6ee}
+.modal{background:rgba(24,36,28,.6)}
+
+/* Booking page (book.php) - sage */
+.booking-page .stepper{background:var(--sage-100) !important}
+.booking-page .stepper li.active{color:var(--sage-900) !important}
+.booking-page .stepper li.active .num{background:var(--sage-700) !important;border-color:var(--sage-700) !important}
+.booking-page .btn-back{border-color:var(--sage-700) !important;color:var(--sage-700) !important}
+.booking-page .choice-tab.active{color:var(--sage-700) !important;border-bottom-color:var(--sage-700) !important}
+.booking-page .choice-name{color:var(--sage-900) !important}
+.booking-page .choice-facts .fact.price,.booking-page .choice-card .choice-price,.booking-page .summary-total strong,.booking-page .summary-split strong,.booking-page .pay-amounts strong,.booking-page .prov-amount strong{color:var(--sage-700) !important}
+.booking-page .choice-card .choice-btn{border-color:var(--sage-700) !important;color:var(--sage-700) !important;background:var(--sage-100) !important}
+.booking-page .choice-card:hover .choice-btn{background:var(--sage-700) !important;color:#fff !important}
+.booking-page .choice-card.selected .choice-btn,.booking-page .choice-card.selected:hover .choice-btn{background:#648568 !important;border-color:#648568 !important;color:#fff !important}
+.booking-page .choice-card:hover{box-shadow:0 16px 30px rgba(47,64,51,.16) !important}
+.booking-page .choice-card .choice-badge{background:var(--sage-700) !important}
+.booking-page .slot-grid .slot.available > span:hover{border-color:var(--sage-700) !important}
+.booking-page .slot-grid .slot.available input:checked + span{background:var(--sage-700) !important;border-color:var(--sage-700) !important}
+.booking-page .summary-card{background:var(--sage-50) !important;border-color:var(--sage-200) !important}
+.booking-page .summary-box,.booking-page .summary-split div{background:var(--sage-100) !important}
+.booking-page .pay-amounts div{background:var(--sage-50) !important}
+.booking-page .pay-icon,.booking-page .prov-logo{background:var(--sage-100) !important;color:var(--sage-700) !important}
+.booking-page .pay-caret{color:var(--sage-700) !important}
+.booking-page .pay-trigger:hover,.booking-page .pay-trigger[aria-expanded="true"],.booking-page .prov-row:hover,.booking-page .file-drop:hover{border-color:var(--sage-700) !important}
+.booking-page .copy-btn{border-color:var(--sage-700) !important;color:var(--sage-700) !important}
+.booking-page .copy-btn.copied{background:#648568 !important;border-color:#648568 !important;color:#fff !important}
+.booking-page .prov-panel{background:var(--sage-50) !important;border-color:var(--sage-200) !important}
+.booking-page .policy-box li strong{color:var(--sage-900) !important}
+
+/* =========================================================
+   BELLA VISTA LOGO
+   Ilagay ang logo-transparent.png sa assets/images/
+   ========================================================= */
+/* Header / login logo: TRANSPARENT (walang bilog). Isang file lang ang gamit (logo-transparent.png).
+   Kulay: sage kapag solid ang header o sa ibang page; cream kapag transparent ang header sa ibabaw ng hero. */
+.brand-mark{font-size:0!important;color:transparent!important;border:0!important;border-radius:0!important;overflow:hidden;width:64px;height:44px;flex-shrink:0;background:var(--sage-700)!important;-webkit-mask:url('images/logo-transparent.png') center/contain no-repeat;mask:url('images/logo-transparent.png') center/contain no-repeat}
+.brand-mark img{display:none}
+.site-header.header-overlay:not(.is-scrolled) .brand-mark{background:#ffedd1!important}
+
+/* Footer logo (transparent version, bagay sa dark sage) */
+.bv-mark{font-size:0!important;color:transparent!important;border:0!important;width:58px!important;height:48px!important;border-radius:0!important;background:url('images/logo-transparent.png') center/contain no-repeat!important;-webkit-mask:none!important;mask:none!important}
+
+/* "Our Story" photo: transparent logo sa ibabaw ng larawan */
+.art-circle{width:260px;height:260px;border:0;border-radius:0;background:url('images/logo-transparent.png') center/contain no-repeat;filter:drop-shadow(0 4px 16px rgba(0,0,0,.40))}
+.art-circle::before,.art-circle::after,.art-circle span{display:none}
+.art-circle small{position:absolute;left:0;right:0;bottom:-34px;text-align:center;color:#fff;letter-spacing:.3em;font-size:12px}
+@media(max-width:760px){.art-circle{width:210px;height:210px}}
+
+/* =========================================================
+   TRANSPARENT HEADER -> SOLID PAG NAG-SCROLL (homepage)
+   ========================================================= */
+html{scroll-padding-top:80px}
+.site-header.header-overlay{position:fixed;top:0;left:0;right:0;z-index:50;background:transparent;transition:background .35s ease,box-shadow .35s ease,height .35s ease}
+.site-header.header-overlay + main .hero{padding-top:150px;min-height:772px}
+
+/* Nasa taas (transparent): puting text */
+.site-header.header-overlay:not(.is-scrolled) .brand{color:#fff}
+.site-header.header-overlay:not(.is-scrolled) .brand small{color:rgba(255,255,255,.85)}
+.site-header.header-overlay:not(.is-scrolled) .nav-links a:not(.nav-book){color:#fff}
+.site-header.header-overlay:not(.is-scrolled) .nav-links a:not(.nav-book):hover{color:var(--gold-soft);border-bottom-color:var(--gold-soft)}
+.site-header.header-overlay:not(.is-scrolled) .menu-toggle{color:#fff;border-color:rgba(255,255,255,.55)}
+
+/* Pag nag-scroll: solid cream, may anino */
+.site-header.header-overlay.is-scrolled{background:var(--paper);height:78px;box-shadow:0 6px 24px rgba(47,64,51,.12)}
+
+/* Mobile: puti ang dropdown menu kaya dark ang text niya */
+@media(max-width:760px){
+  .site-header.header-overlay:not(.is-scrolled) .nav-links a:not(.nav-book){color:var(--ink)}
+  .site-header.header-overlay.is-scrolled .nav-links{top:78px}
+}
+@media(prefers-reduced-motion:reduce){.site-header.header-overlay{transition:none}}
+
+/* =========================================================
+   TREATMENT CARDS: ARCH (tulad ng Our Story photo)
+   ========================================================= */
+.service-card{
+  border-radius:999px 999px 28px 28px;   /* bilog sa taas, bahagyang bilog sa baba */
+  min-height:560px;                      /* mas mataas para kita ang arch */
+  padding:24px 30px 30px;
+  outline:1px solid var(--gold);         /* manipis na gold na linya sa paligid */
+  outline-offset:6px;
+}
+@media(max-width:760px){
+  .service-card{min-height:480px;padding:24px 24px 28px}
+}
