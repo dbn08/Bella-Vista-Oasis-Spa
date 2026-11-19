@@ -1,5 +1,6 @@
 <?php
 require_once 'config.php';
+require_once 'mailer.php';
 
 /* ---------- Access control: sign in, sign out and the dashboard all live in this file ---------- */
 if (empty($_SESSION['admin_id'])) {
@@ -15,7 +16,7 @@ if (empty($_SESSION['admin_id'])) {
             header('Location: admin_dashboard.php');
             exit;
         }
-        usleep(400000);                                   // slow down password guessing
+        usleep(400000);
         $loginError = 'Invalid username or password.';
     }
     $loginNotice = $_SESSION['flash'] ?? null;
@@ -25,17 +26,17 @@ if (empty($_SESSION['admin_id'])) {
 }
 $adminName = $_SESSION['admin_username'] ?? 'admin';
 
-/* ---------- Rules (keep in sync with book.php / save_booking.php) ---------- */
+/* ---------- Rules (synced with book.php & save_booking.php) ---------- */
 const BV_SLOTS = ['09:00', '10:30', '12:00', '13:30', '15:00', '16:30'];
 const BV_MAX_GUESTS = 6;
-const BV_EXTRA_RATE = 0.80;
-const HOLD_HOURS = 24;   // unpaid cash reservations are released after this
-$downRates    = ['cash' => 0.10, 'ewallet' => 0.30, 'bank' => 0.30];
+const BV_EXTRA_RATE = 1.00;
+const HOLD_HOURS = 24;
+$downRates    = ['cash' => 0.00, 'ewallet' => 0.30, 'bank' => 0.30];
 $providers    = ['ewallet' => ['gcash' => 'GCash', 'maya' => 'Maya'], 'bank' => ['bdo' => 'BDO', 'bpi' => 'BPI', 'unionbank' => 'UnionBank']];
-$methodLabels = ['cash' => 'Cash', 'ewallet' => 'E-wallet', 'bank' => 'Online banking'];
+$methodLabels = ['cash' => 'Pay at the store', 'ewallet' => 'E-wallet', 'bank' => 'Online banking'];
 $statuses     = ['Pending', 'Confirmed', 'Completed', 'Cancelled'];
 $payStatuses  = ['unpaid', 'pending', 'verified', 'refunded'];
-$kinds        = ['service' => 'services', 'package' => 'packages'];
+$kinds        = ['service' => 'services', 'package' => 'packages', 'addon' => 'addons'];
 
 if (empty($_SESSION['csrf'])) {
     $_SESSION['csrf'] = bin2hex(random_bytes(16));
@@ -52,7 +53,7 @@ function bv_back(string $qs): void {
     exit;
 }
 
-/* Sign-in screen (shown instead of the dashboard when nobody is logged in) */
+/* Sign-in screen */
 function bv_render_login(string $error, ?array $notice): void { ?>
 <!doctype html>
 <html lang="en">
@@ -117,12 +118,19 @@ function bv_stats(PDO $pdo): array {
     ];
 }
 
-/* Items (treatments/packages) of several appointments: [appointment_id => [rows]] */
+/* Items (treatments, packages, rooms, add-ons) of appointments */
 function bv_items_for(PDO $pdo, array $ids): array {
     $out = [];
     if (!$ids) return $out;
     $in = implode(',', array_fill(0, count($ids), '?'));
-    $st = $pdo->prepare("SELECT appointment_id, item_type, item_id, item_name FROM appointment_items WHERE appointment_id IN ($in) ORDER BY id");
+    $hasGuestNo = false;
+    try {
+        $hasGuestNo = (bool)$pdo->query("SHOW COLUMNS FROM appointment_items LIKE 'guest_no'")->fetch();
+    } catch (PDOException $e) {}
+    $cols = $hasGuestNo
+        ? 'appointment_id, item_type, item_id, item_name, guest_no'
+        : 'appointment_id, item_type, item_id, item_name, NULL AS guest_no';
+    $st = $pdo->prepare("SELECT $cols FROM appointment_items WHERE appointment_id IN ($in) ORDER BY id");
     $st->execute(array_values($ids));
     foreach ($st->fetchAll() as $r) {
         $out[(int)$r['appointment_id']][] = $r;
@@ -136,34 +144,31 @@ function bv_slot_taken(PDO $pdo, string $date, string $time, int $exceptId = 0):
     return (int)$st->fetchColumn() > 0;
 }
 
-
-/* Cancel unpaid cash reservations whose hold period has ended */
 function bv_release_unpaid(PDO $pdo): void {
     try {
         $pdo->exec("UPDATE appointments SET status = 'Cancelled' WHERE status = 'Pending' AND payment_method = 'cash' AND payment_status = 'unpaid' AND created_at < (NOW() - INTERVAL " . (int)HOLD_HOURS . " HOUR)");
-    } catch (Throwable $e) {
-    }
+    } catch (Throwable $e) {}
 }
 
-/* Best-effort email to the customer when their booking changes (needs a configured mail server) */
-function bv_notify(PDO $pdo, int $id, string $status): void {
-    $messages = [
-        'Confirmed' => 'Good news! Your booking is confirmed. We look forward to seeing you.',
-        'Cancelled' => 'Your booking has been cancelled. You are welcome to make a new booking anytime.',
-        'Completed' => 'Thank you for visiting Bella Vista Oasis Spa. We hope to see you again soon.',
-    ];
-    if (!isset($messages[$status])) return;
+function bv_notify(PDO $pdo, int $id, string $status): ?bool {
+    if (!in_array($status, ['Confirmed', 'Cancelled', 'Completed'], true)) return null;
     $st = $pdo->prepare('SELECT booking_code, customer_name, email, appointment_date, appointment_time FROM appointments WHERE id = ?');
     $st->execute([$id]);
     $a = $st->fetch();
-    if (!$a) return;
-    $base = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost')
-          . rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
-    $body = 'Hi ' . $a['customer_name'] . ",\r\n\r\n" . $messages[$status] . "\r\n\r\nBooking code: " . $a['booking_code']
-          . "\r\nDate: " . date('F j, Y', strtotime($a['appointment_date'])) . ' at ' . date('g:i A', strtotime($a['appointment_time']))
-          . "\r\n\r\nTrack your booking: " . $base . '/track.php?code=' . $a['booking_code'] . "\r\n";
-    @mail($a['email'], 'Bella Vista Oasis Spa - booking ' . $a['booking_code'] . ' ' . strtolower($status), $body,
-          "From: Bella Vista Oasis Spa <no-reply@bellavista.local>\r\nContent-Type: text/plain; charset=UTF-8");
+    if (!$a) return null;
+    [$subject, $html, $text] = bv_email_status_changed([
+        'code' => $a['booking_code'],
+        'name' => $a['customer_name'],
+        'date' => $a['appointment_date'],
+        'time' => substr($a['appointment_time'], 0, 5),
+    ], $status);
+    [$sent] = bv_send_mail($a['email'], $a['customer_name'], $subject, $html, $text);
+    return $sent;
+}
+
+function bv_email_note(?bool $sent): string {
+    if ($sent === null) return '';
+    return $sent ? ' The customer was emailed.' : ' (The email could not be sent - check mailer.php.)';
 }
 
 function bv_save_image(string $folder, int $id, array $file, ?string $old): ?string {
@@ -192,7 +197,7 @@ function bv_remove_file(?string $path, string $prefix): void {
 
 bv_release_unpaid($pdo);
 
-/* ---------- Live stats (polled by the page every 20 seconds) ---------- */
+/* ---------- Live stats ---------- */
 if (($_GET['ajax'] ?? '') === 'stats') {
     header('Content-Type: application/json');
     header('Cache-Control: no-store');
@@ -238,8 +243,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 bv_back($back);
             }
             $pdo->prepare('UPDATE appointments SET status = ? WHERE id = ?')->execute([$status, $id]);
-            bv_notify($pdo, $id, $status);
-            bv_flash('success', 'Booking status updated to ' . $status . '.');
+            $emailSent = bv_notify($pdo, $id, $status);
+            bv_flash('success', 'Booking status updated to ' . $status . '.' . bv_email_note($emailSent));
             bv_back($back);
         }
 
@@ -250,14 +255,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->prepare('UPDATE appointments SET payment_status = ? WHERE id = ?')->execute([$ps, $id]);
                 $msg = 'Payment marked as ' . $ps . '.';
                 if ($ps === 'verified') {
-                    // Verified down payment confirms a pending booking (if its slot is still free).
                     $cur = $pdo->prepare('SELECT status, appointment_date, appointment_time FROM appointments WHERE id = ?');
                     $cur->execute([$id]);
                     $c = $cur->fetch();
                     if ($c && $c['status'] === 'Pending' && !bv_slot_taken($pdo, $c['appointment_date'], substr($c['appointment_time'], 0, 5), $id)) {
                         $pdo->prepare("UPDATE appointments SET status = 'Confirmed' WHERE id = ?")->execute([$id]);
-                        bv_notify($pdo, $id, 'Confirmed');
-                        $msg = 'Payment verified and booking confirmed. The customer can see this on the Track my booking page.';
+                        $emailSent = bv_notify($pdo, $id, 'Confirmed');
+                        $msg = 'Payment verified and booking confirmed. The customer can see this on the Track my booking page.' . bv_email_note($emailSent);
                     }
                 }
                 bv_flash('success', $msg);
@@ -267,19 +271,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         /* ----- create / update appointment ----- */
         if ($op === 'save_appointment') {
-            $id      = (int)($_POST['appointment_id'] ?? 0);
-            $name    = trim($_POST['customer_name'] ?? '');
-            $email   = trim($_POST['email'] ?? '');
-            $phone   = trim($_POST['phone'] ?? '');
-            $date    = $_POST['appointment_date'] ?? '';
-            $time    = $_POST['appointment_time'] ?? '';
-            $guests  = filter_var($_POST['guests'] ?? '', FILTER_VALIDATE_INT);
-            $notes   = trim($_POST['notes'] ?? '');
-            $status  = $_POST['booking_status'] ?? 'Pending';
-            $method  = $_POST['pay_method'] ?? 'cash';
+            $id       = (int)($_POST['appointment_id'] ?? 0);
+            $name     = trim($_POST['customer_name'] ?? '');
+            $email    = trim($_POST['email'] ?? '');
+            $phone    = trim($_POST['phone'] ?? '');
+            $date     = $_POST['appointment_date'] ?? '';
+            $time     = $_POST['appointment_time'] ?? '';
+            $guests   = filter_var($_POST['guests'] ?? '', FILTER_VALIDATE_INT);
+            $roomId   = filter_var($_POST['room_id'] ?? '', FILTER_VALIDATE_INT);
+            $notes    = trim($_POST['notes'] ?? '');
+            $status   = $_POST['booking_status'] ?? 'Pending';
+            $method   = $_POST['pay_method'] ?? 'cash';
             $provider = $_POST['pay_provider'] ?? '';
             $payStatus = $_POST['pay_status'] ?? 'unpaid';
-            $refNo   = trim($_POST['pay_ref'] ?? '');
+            $refNo    = trim($_POST['pay_ref'] ?? '');
 
             $err = '';
             if ($name === '' || mb_strlen($name) > 120 || !preg_match("/^\p{L}[\p{L}\s.'-]*$/u", $name)) $err = 'Please enter a valid guest name.';
@@ -316,14 +321,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($method === 'cash') $provider = '';
             }
 
-            /* items */
+            /* Room check */
+            $room = null;
+            if ($err === '' && $roomId) {
+                try {
+                    $st = $pdo->prepare('SELECT id, name, max_guests, price FROM rooms WHERE id = ?');
+                    $st->execute([$roomId]);
+                    $room = $st->fetch();
+                    if (!$room) $err = 'Selected room not found.';
+                    elseif ($guests > (int)$room['max_guests']) $err = $room['name'] . ' fits up to ' . (int)$room['max_guests'] . ' guest(s).';
+                } catch (PDOException $e) {}
+            }
+
+            /* Treatments, packages, add-ons */
             $items = [];
+            $addonItems = [];
             if ($err === '') {
-                $sel = ['service' => [], 'package' => []];
+                $sel = ['service' => [], 'package' => [], 'addon' => []];
                 foreach ((array)($_POST['items'] ?? []) as $v) {
-                    if (preg_match('/^(service|package):(\d+)$/', (string)$v, $m)) $sel[$m[1]][(int)$m[2]] = (int)$m[2];
+                    if (preg_match('/^(service|package|addon):(\d+)$/', (string)$v, $m)) $sel[$m[1]][(int)$m[2]] = (int)$m[2];
                 }
-                foreach ($sel as $type => $ids) {
+                foreach (['service', 'package'] as $type) {
+                    $ids = $sel[$type];
                     if (!$ids) continue;
                     $tbl = $kinds[$type];
                     try {
@@ -339,6 +358,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $items[] = ['type' => $type, 'id' => (int)$r['id'], 'name' => $r['name'], 'price' => (float)$r['price'], 'duration' => (int)$r['duration_minutes']];
                     }
                 }
+                if ($err === '' && $sel['addon']) {
+                    try {
+                        $ids = $sel['addon'];
+                        $in = implode(',', array_fill(0, count($ids), '?'));
+                        $st = $pdo->prepare("SELECT id, name, price FROM addons WHERE id IN ($in)");
+                        $st->execute(array_values($ids));
+                        foreach ($st->fetchAll() as $r) {
+                            $addonItems[] = ['type' => 'addon', 'id' => (int)$r['id'], 'name' => $r['name'] . ' (add-on)', 'price' => (float)$r['price'], 'duration' => 0, 'line_total' => round((float)$r['price'], 2)];
+                        }
+                    } catch (PDOException $e) {}
+                }
                 if ($err === '' && !$items) $err = 'Please select at least one treatment or package.';
             }
 
@@ -353,7 +383,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $total += $it['line_total'];
             }
             unset($it);
+
+            $extras = [];
+            if ($room && (float)$room['price'] > 0) {
+                $extras[] = ['type' => 'room', 'id' => (int)$room['id'], 'name' => $room['name'] . ' (room fee)', 'price' => (float)$room['price'], 'duration' => 0, 'line_total' => round((float)$room['price'], 2)];
+            }
+            $extras = array_merge($extras, $addonItems);
+            foreach ($extras as $ex) {
+                $total += $ex['line_total'];
+            }
             $total = round($total, 2);
+            $allItems = array_merge($items, $extras);
+
             $amountDue = round($total * $downRates[$method], 2);
             $firstService = null;
             foreach ($items as $it) { if ($it['type'] === 'service') { $firstService = $it['id']; break; } }
@@ -371,8 +412,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $id = (int)$pdo->lastInsertId();
                 $msg = 'Booking ' . $code . ' created.';
             }
+            try {
+                $pdo->prepare('UPDATE appointments SET room_id = ? WHERE id = ?')->execute([$room ? (int)$room['id'] : null, $id]);
+            } catch (PDOException $e) {}
+
             $ins = $pdo->prepare('INSERT INTO appointment_items (appointment_id, item_type, item_id, item_name, unit_price, duration_minutes, line_total) VALUES (?,?,?,?,?,?,?)');
-            foreach ($items as $it) {
+            foreach ($allItems as $it) {
                 $ins->execute([$id, $it['type'], $it['id'], $it['name'], $it['price'], $it['duration'], $it['line_total']]);
             }
             $pdo->commit();
@@ -395,23 +440,101 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             bv_back($back);
         }
 
-        /* ----- create / update service or package ----- */
+        /* ----- create / update room ----- */
+        if ($op === 'save_room') {
+            $id     = (int)($_POST['room_id'] ?? 0);
+            $rname  = trim($_POST['room_name'] ?? '');
+            $desc   = trim($_POST['description'] ?? '');
+            $minG   = filter_var($_POST['min_guests'] ?? '', FILTER_VALIDATE_INT);
+            $maxG   = filter_var($_POST['max_guests'] ?? '', FILTER_VALIDATE_INT);
+            $dur    = filter_var($_POST['duration'] ?? '', FILTER_VALIDATE_INT);
+            $price  = filter_var($_POST['price'] ?? '', FILTER_VALIDATE_FLOAT);
+            $active = !empty($_POST['is_active']) ? 1 : 0;
+
+            if ($rname === '' || mb_strlen($rname) > 120) { bv_flash('error', 'Please enter a room name (max 120 characters).'); bv_back($back); }
+            if (!$minG || !$maxG || $minG < 1 || $maxG < $minG || $maxG > BV_MAX_GUESTS) { bv_flash('error', 'Guest capacity must be valid (1 to ' . BV_MAX_GUESTS . ').'); bv_back($back); }
+            if (!$dur || $dur < 5 || $dur > 600) { bv_flash('error', 'Duration must be between 5 and 600 minutes.'); bv_back($back); }
+            if ($price === false || $price < 0 || $price > 1000000) { bv_flash('error', 'Please enter a valid room fee.'); bv_back($back); }
+
+            $old = null;
+            if ($id) {
+                $st = $pdo->prepare('SELECT image FROM rooms WHERE id = ?');
+                $st->execute([$id]);
+                $found = $st->fetch();
+                if (!$found) { bv_flash('error', 'Room not found.'); bv_back($back); }
+                $old = $found['image'] ?? null;
+                $pdo->prepare('UPDATE rooms SET name = ?, description = ?, min_guests = ?, max_guests = ?, duration_minutes = ?, price = ?, active = ? WHERE id = ?')
+                    ->execute([$rname, $desc, $minG, $maxG, $dur, $price, $active, $id]);
+                $msg = 'Room updated.';
+            } else {
+                $pdo->prepare('INSERT INTO rooms (name, description, min_guests, max_guests, duration_minutes, price, active) VALUES (?,?,?,?,?,?,?)')
+                    ->execute([$rname, $desc, $minG, $maxG, $dur, $price, $active]);
+                $id = (int)$pdo->lastInsertId();
+                $msg = 'Room added.';
+            }
+            try {
+                $path = bv_save_image('rooms', $id, $_FILES['image'] ?? ['error' => UPLOAD_ERR_NO_FILE], $old);
+                if ($path) $pdo->prepare('UPDATE rooms SET image = ? WHERE id = ?')->execute([$path, $id]);
+            } catch (RuntimeException $e) {
+                bv_flash('error', 'Room saved, but the picture was not: ' . $e->getMessage());
+                bv_back($back);
+            }
+            bv_flash('success', $msg);
+            bv_back($back);
+        }
+
+        if ($op === 'toggle_room' || $op === 'delete_room') {
+            $id = (int)($_POST['room_id'] ?? 0);
+            if (!$id) { bv_flash('error', 'Invalid request.'); bv_back($back); }
+            if ($op === 'toggle_room') {
+                $pdo->prepare('UPDATE rooms SET active = 1 - active WHERE id = ?')->execute([$id]);
+                bv_flash('success', 'Room visibility updated.');
+            } else {
+                $st = $pdo->prepare('SELECT image FROM rooms WHERE id = ?');
+                $st->execute([$id]);
+                $img = $st->fetchColumn();
+                try {
+                    $pdo->prepare('DELETE FROM rooms WHERE id = ?')->execute([$id]);
+                    bv_remove_file($img ?: null, 'assets/images/rooms/');
+                    bv_flash('success', 'Room deleted.');
+                } catch (PDOException $e) {
+                    bv_flash('error', 'This room is used by existing bookings. Deactivate it instead.');
+                }
+            }
+            bv_back($back);
+        }
+
+        /* ----- create / update service, package, or add-on ----- */
         if ($op === 'save_item') {
             $kind = $_POST['kind'] ?? '';
             if (!isset($kinds[$kind])) { bv_flash('error', 'Unknown item type.'); bv_back($back); }
             $table = $kinds[$kind];
-            $label = $kind === 'package' ? 'Package' : 'Treatment';
+            $label = $kind === 'package' ? 'Package' : ($kind === 'addon' ? 'Add-on' : 'Treatment');
             $id    = (int)($_POST['item_id'] ?? 0);
             $iname = trim($_POST['item_name'] ?? '');
             $desc  = trim($_POST['description'] ?? '');
-            $dur   = filter_var($_POST['duration'] ?? '', FILTER_VALIDATE_INT);
+            $dur   = filter_var($_POST['duration'] ?? 60, FILTER_VALIDATE_INT);
             $price = filter_var($_POST['price'] ?? '', FILTER_VALIDATE_FLOAT);
             $active = !empty($_POST['is_active']) ? 1 : 0;
 
             if ($iname === '' || mb_strlen($iname) > 120) { bv_flash('error', 'Please enter a name (max 120 characters).'); bv_back($back); }
             if (mb_strlen($desc) > 1000) { bv_flash('error', 'Description is too long (max 1000 characters).'); bv_back($back); }
-            if (!$dur || $dur < 5 || $dur > 600) { bv_flash('error', 'Duration must be between 5 and 600 minutes.'); bv_back($back); }
+            if ($kind !== 'addon' && (!$dur || $dur < 5 || $dur > 600)) { bv_flash('error', 'Duration must be between 5 and 600 minutes.'); bv_back($back); }
             if ($price === false || $price < 0 || $price > 1000000) { bv_flash('error', 'Please enter a valid price.'); bv_back($back); }
+
+            if ($kind === 'addon') {
+                if ($id) {
+                    $pdo->prepare('UPDATE addons SET name = ?, description = ?, price = ?, active = ? WHERE id = ?')
+                        ->execute([$iname, $desc, $price, $active, $id]);
+                    $msg = 'Add-on updated.';
+                } else {
+                    $pdo->prepare('INSERT INTO addons (name, description, price, active) VALUES (?,?,?,?)')
+                        ->execute([$iname, $desc, $price, $active]);
+                    $msg = 'Add-on added.';
+                }
+                bv_flash('success', $msg);
+                bv_back($back);
+            }
 
             $old = null;
             if ($id) {
@@ -491,12 +614,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->prepare("UPDATE $table SET active = 1 - active WHERE id = ?")->execute([$id]);
                 bv_flash('success', 'Visibility updated.');
             } else {
-                $st = $pdo->prepare("SELECT image FROM $table WHERE id = ?");
-                $st->execute([$id]);
-                $img = $st->fetchColumn();
+                $img = null;
+                if ($kind !== 'addon') {
+                    $st = $pdo->prepare("SELECT image FROM $table WHERE id = ?");
+                    $st->execute([$id]);
+                    $img = $st->fetchColumn();
+                }
                 try {
                     $pdo->prepare("DELETE FROM $table WHERE id = ?")->execute([$id]);
-                    bv_remove_file($img ?: null, 'assets/images/' . $table . '/');
+                    if ($img) bv_remove_file($img, 'assets/images/' . $table . '/');
                     bv_flash('success', 'Deleted.');
                 } catch (PDOException $e) {
                     bv_flash('error', 'This item is used by existing bookings and cannot be deleted. Deactivate it instead.');
@@ -515,7 +641,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 /* ---------- Page data ---------- */
-$tab = in_array($_GET['tab'] ?? '', ['overview', 'appointments', 'services', 'packages', 'admins', 'preview'], true) ? $_GET['tab'] : 'overview';
+$validTabs = ['overview', 'appointments', 'rooms', 'services', 'packages', 'addons', 'admins', 'preview'];
+$tab = in_array($_GET['tab'] ?? '', $validTabs, true) ? $_GET['tab'] : 'overview';
 $flash = $_SESSION['flash'] ?? null;
 unset($_SESSION['flash']);
 
@@ -527,6 +654,20 @@ try {
 } catch (PDOException $e) {
     $packages = [];
     $hasPackages = false;
+}
+try {
+    $rooms = $pdo->query('SELECT * FROM rooms ORDER BY min_guests ASC, price ASC')->fetchAll();
+    $hasRooms = true;
+} catch (PDOException $e) {
+    $rooms = [];
+    $hasRooms = false;
+}
+try {
+    $addons = $pdo->query('SELECT * FROM addons ORDER BY name')->fetchAll();
+    $hasAddons = true;
+} catch (PDOException $e) {
+    $addons = [];
+    $hasAddons = false;
 }
 
 /* Admin accounts */
@@ -568,7 +709,13 @@ if ($tab === 'appointments') {
     $page = min(max(1, (int)($_GET['page'] ?? 1)), $pages);
     $off = ($page - 1) * $per;
 
-    $st = $pdo->prepare("SELECT a.*, s.name AS service_name FROM appointments a LEFT JOIN services s ON s.id = a.service_id WHERE $whereSql ORDER BY a.id DESC LIMIT $per OFFSET $off");
+    $hasRoomCol = false;
+    try { $hasRoomCol = (bool)$pdo->query("SHOW COLUMNS FROM appointments LIKE 'room_id'")->fetch(); } catch (PDOException $e) {}
+    $sql = $hasRoomCol
+        ? "SELECT a.*, s.name AS service_name, r.name AS room_name FROM appointments a LEFT JOIN services s ON s.id = a.service_id LEFT JOIN rooms r ON r.id = a.room_id WHERE $whereSql ORDER BY a.id DESC LIMIT $per OFFSET $off"
+        : "SELECT a.*, s.name AS service_name, NULL AS room_name FROM appointments a LEFT JOIN services s ON s.id = a.service_id WHERE $whereSql ORDER BY a.id DESC LIMIT $per OFFSET $off";
+
+    $st = $pdo->prepare($sql);
     $st->execute($params);
     $rows = $st->fetchAll();
     $itemsMap = bv_items_for($pdo, array_column($rows, 'id'));
@@ -625,10 +772,15 @@ function bv_render_items(array $list, string $kind, string $csrf, string $back):
 }
 
 function bv_item_names(array $a, array $itemsMap): string {
-    $names = [];
-    foreach ($itemsMap[(int)$a['id']] ?? [] as $r) $names[] = $r['item_name'];
-    if (!$names && !empty($a['service_name'])) $names[] = $a['service_name'];
-    return $names ? implode(', ', array_map('bv_h', $names)) : '<span class="muted">—</span>';
+    $lines = [];
+    $guests = (int)($a['guests'] ?? 1);
+    foreach ($itemsMap[(int)$a['id']] ?? [] as $r) {
+        if ($r['item_type'] === 'room') continue;
+        $prefix = (!empty($r['guest_no']) && $guests > 1) ? 'G' . (int)$r['guest_no'] . ': ' : '';
+        $lines[] = bv_h($prefix . $r['item_name']);
+    }
+    if (!$lines && !empty($a['service_name'])) $lines[] = bv_h($a['service_name']);
+    return $lines ? implode('<br>', $lines) : '<span class="muted">—</span>';
 }
 ?>
 <!doctype html>
@@ -649,17 +801,17 @@ function bv_item_names(array $a, array $itemsMap): string {
 body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans); font-size:15px; line-height:1.5; }
 a { color:inherit; }
 .topbar { background:var(--card); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:20; }
-.topbar-in { max-width:1320px; margin:0 auto; padding:14px 28px; display:flex; align-items:center; gap:28px; flex-wrap:wrap; }
+.topbar-in { max-width:1360px; margin:0 auto; padding:14px 24px; display:flex; align-items:center; gap:20px; flex-wrap:wrap; }
 .brand { display:flex; align-items:center; gap:12px; text-decoration:none; }
 .brand-mark { width:42px; height:42px; border-radius:50%; border:1px solid #cdbfae; display:flex; align-items:center; justify-content:center; color:#b58a52; font-size:18px; }
 .brand-text { font-family:var(--serif); font-size:20px; letter-spacing:.2em; line-height:1.1; }
 .brand-text small { display:block; font-family:var(--sans); font-size:10px; letter-spacing:.3em; color:var(--muted); }
 .tabs { display:flex; gap:4px; flex:1; overflow-x:auto; }
-.tabs a { text-decoration:none; padding:9px 18px; border-radius:999px; font-size:14px; color:var(--muted); white-space:nowrap; }
+.tabs a { text-decoration:none; padding:8px 15px; border-radius:999px; font-size:13.5px; color:var(--muted); white-space:nowrap; }
 .tabs a:hover { background:#f3ebdf; color:var(--ink); }
 .tabs a.active { background:var(--brown); color:#fff; }
 .top-actions { display:flex; align-items:center; gap:10px; font-size:13px; color:var(--muted); }
-.wrap { max-width:1320px; margin:0 auto; padding:32px 28px 60px; }
+.wrap { max-width:1360px; margin:0 auto; padding:32px 24px 60px; }
 .page-head { display:flex; justify-content:space-between; align-items:flex-end; gap:16px; flex-wrap:wrap; margin-bottom:26px; }
 .page-head h1 { margin:0; font-family:var(--serif); font-weight:600; font-size:36px; line-height:1.1; }
 .page-head p { margin:4px 0 0; color:var(--muted); }
@@ -681,7 +833,6 @@ a { color:inherit; }
 .stat span { display:block; font-size:13px; color:var(--muted); }
 .stat strong { display:block; margin-top:6px; font-family:var(--serif); font-size:34px; font-weight:600; line-height:1.1; }
 .stat.hot strong { color:var(--amber); }
-.stat small { color:var(--muted); font-size:12px; }
 
 .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
 .panel { padding:22px 24px; }
@@ -700,7 +851,7 @@ a { color:inherit; }
 .table-wrap { overflow-x:auto; }
 .tbl { width:100%; border-collapse:collapse; min-width:980px; }
 .tbl th { text-align:left; font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); font-weight:500; padding:14px 18px; background:#f3ebdf; white-space:nowrap; }
-.tbl td { padding:16px 18px; border-top:1px solid #f0e7da; vertical-align:top; font-size:14px; }
+.tbl td { padding:16px 18px; border-top:1px solid #f0e7da; vertical-align:top; font-size:14px; line-height:1.5; }
 .tbl tr:hover td { background:#fcf8f1; }
 .tbl small { display:block; color:var(--muted); font-size:12.5px; margin-top:2px; }
 .tbl .clamp { max-width:360px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
@@ -752,7 +903,7 @@ dialog::backdrop { background:rgba(63,45,32,.55); }
 .fgrid .check { display:flex; align-items:center; gap:10px; font-weight:400; }
 .fgrid .check input { width:auto; margin:0; }
 .sect { font-size:11px; letter-spacing:.2em; text-transform:uppercase; color:#b58a52; margin:8px 0 -4px; grid-column:1 / -1; }
-.pick { border:1px solid var(--line); border-radius:14px; background:#fff; max-height:190px; overflow-y:auto; padding:6px; margin-top:6px; }
+.pick { border:1px solid var(--line); border-radius:14px; background:#fff; max-height:210px; overflow-y:auto; padding:6px; margin-top:6px; }
 .pick label { display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:10px; cursor:pointer; font-weight:400; }
 .pick label:hover { background:#f6f0e7; }
 .pick input { width:auto; margin:0; }
@@ -770,11 +921,10 @@ dialog::backdrop { background:rgba(63,45,32,.55); }
     .page-head h1 { font-size:30px; }
 }
 
-/* ---------- Yes / No confirmation dialog ---------- */
-dialog.cf { border:0; border-radius:24px; padding:0; width:min(420px,92vw); background:#fffdf9; color:#3f2d20; box-shadow:0 30px 80px rgba(63,45,32,.35); }
+dialog.cf { border:0; border-radius:24px; padding:0; width:min(440px,92vw); background:#fffdf9; color:#3f2d20; box-shadow:0 30px 80px rgba(63,45,32,.35); }
 dialog.cf::backdrop { background:rgba(63,45,32,.55); }
 .cf-body { padding:32px 30px 6px; text-align:center; }
-.cf-body h3 { margin:0 0 8px; font-family:"Cormorant Garamond", Georgia, serif; font-size:28px; font-weight:600; }
+.cf-body h3 { margin:0 0 8px; font-family:var(--serif); font-size:28px; font-weight:600; }
 .cf-body p { margin:0; font-size:14.5px; line-height:1.6; color:#7a6a5c; }
 .cf-foot { display:flex; gap:10px; justify-content:center; padding:22px 30px 28px; }
 .cf-no, .cf-yes { min-width:120px; padding:12px 26px; border-radius:999px; font:inherit; font-size:14px; cursor:pointer; border:1px solid #5a4030; }
@@ -783,8 +933,6 @@ dialog.cf::backdrop { background:rgba(63,45,32,.55); }
 .cf-yes { background:#5a4030; color:#fff; }
 .cf-yes:hover { background:#46301f; }
 
-dialog.cf { width:min(440px,92vw); }
-.cf-body h3 { font-family:var(--serif); }
 .wrap-full { max-width:none; padding:0; }
 .wrap-full .toast { margin:14px 24px; }
 .preview-frame { display:block; width:100%; height:calc(100vh - var(--topbar-h, 86px)); min-height:560px; border:0; background:#fff; }
@@ -801,8 +949,10 @@ dialog.cf { width:min(440px,92vw); }
         <nav class="tabs">
             <a href="?tab=overview" class="<?= $tab === 'overview' ? 'active' : '' ?>">Overview</a>
             <a href="?tab=appointments" class="<?= $tab === 'appointments' ? 'active' : '' ?>">Appointments</a>
+            <a href="?tab=rooms" class="<?= $tab === 'rooms' ? 'active' : '' ?>">Rooms</a>
             <a href="?tab=services" class="<?= $tab === 'services' ? 'active' : '' ?>">Treatments</a>
             <a href="?tab=packages" class="<?= $tab === 'packages' ? 'active' : '' ?>">Packages</a>
+            <a href="?tab=addons" class="<?= $tab === 'addons' ? 'active' : '' ?>">Add-ons</a>
             <a href="?tab=admins" class="<?= $tab === 'admins' ? 'active' : '' ?>">Admins</a>
             <a href="?tab=preview" class="<?= $tab === 'preview' ? 'active' : '' ?>">Booking page</a>
         </nav>
@@ -916,24 +1066,34 @@ dialog.cf { width:min(440px,92vw); }
     <div class="card table-card"><div class="table-wrap">
     <table class="tbl">
         <thead><tr>
-            <th>Booking</th><th>Guest</th><th>Treatments</th><th>Schedule</th><th>Payment</th><th>Total</th><th>Status</th><th class="right">Actions</th>
+            <th>Booking</th><th>Guest</th><th>Room &amp; Treatments</th><th>Schedule</th><th>Payment</th><th>Total</th><th>Status</th><th class="right">Actions</th>
         </tr></thead>
         <tbody>
         <?php foreach ($rows as $a):
             $sel = [];
-            foreach ($itemsMap[(int)$a['id']] ?? [] as $r) $sel[] = $r['item_type'] . ':' . $r['item_id'];
+            foreach ($itemsMap[(int)$a['id']] ?? [] as $r) {
+                if (in_array($r['item_type'], ['service', 'package', 'addon'], true)) {
+                    $sel[] = $r['item_type'] . ':' . $r['item_id'];
+                }
+            }
             if (!$sel && $a['service_id']) $sel[] = 'service:' . (int)$a['service_id'];
             $data = [
                 'id' => (int)$a['id'], 'name' => $a['customer_name'], 'email' => $a['email'], 'phone' => $a['phone'],
                 'date' => $a['appointment_date'], 'time' => substr($a['appointment_time'], 0, 5), 'guests' => (int)$a['guests'],
-                'notes' => $a['notes'] ?? '', 'status' => $a['status'], 'method' => $a['payment_method'], 'provider' => $a['payment_provider'] ?? '',
+                'room_id' => (int)($a['room_id'] ?? 0), 'notes' => $a['notes'] ?? '', 'status' => $a['status'],
+                'method' => $a['payment_method'], 'provider' => $a['payment_provider'] ?? '',
                 'pay_status' => $a['payment_status'], 'ref' => $a['reference_no'] ?? '', 'items' => $sel,
             ];
         ?>
             <tr>
                 <td><strong><?= bv_h($a['booking_code']) ?></strong><small><?= date('M j, Y', strtotime($a['created_at'])) ?></small></td>
                 <td><strong><?= bv_h($a['customer_name']) ?></strong><small><?= bv_h($a['email']) ?></small><small><?= bv_h($a['phone']) ?></small></td>
-                <td><?= bv_item_names($a, $itemsMap) ?></td>
+                <td>
+                    <?php if (!empty($a['room_name'])): ?>
+                        <span class="badge b-confirmed" style="margin-bottom:4px;"><?= bv_h($a['room_name']) ?></span><br>
+                    <?php endif; ?>
+                    <?= bv_item_names($a, $itemsMap) ?>
+                </td>
                 <td><strong><?= date('M j, Y', strtotime($a['appointment_date'])) ?></strong><small><?= date('g:i A', strtotime($a['appointment_time'])) ?> · <?= (int)$a['guests'] ?> guest<?= $a['guests'] > 1 ? 's' : '' ?></small></td>
                 <td>
                     <strong><?= bv_h($methodLabels[$a['payment_method']] ?? $a['payment_method']) ?><?= $a['payment_provider'] ? ' · ' . bv_h($providers[$a['payment_method']][$a['payment_provider']] ?? $a['payment_provider']) : '' ?></strong>
@@ -980,6 +1140,98 @@ dialog.cf { width:min(440px,92vw); }
             <?php endfor; ?>
         </div>
     <?php endif; ?>
+    <?php endif; ?>
+
+<?php elseif ($tab === 'rooms'): ?>
+    <div class="page-head">
+        <div>
+            <div class="eyebrow">Suites &amp; spaces</div>
+            <h1>Rooms</h1>
+            <p><?= count($rooms) ?> room<?= count($rooms) === 1 ? '' : 's' ?> · guests select a suite that fits their party size</p>
+        </div>
+        <?php if ($hasRooms): ?><button class="btn" type="button" data-new-room>+ Add room</button><?php endif; ?>
+    </div>
+    <?php if (!$hasRooms): ?>
+        <div class="empty-state">The <code>rooms</code> table does not exist yet. Import the updated SQL first.</div>
+    <?php elseif (!$rooms): ?>
+        <div class="empty-state">No rooms yet. Use the Add room button to create one.</div>
+    <?php else: ?>
+    <div class="card table-card"><div class="table-wrap"><table class="tbl">
+        <thead><tr><th>Picture</th><th>Room &amp; description</th><th>Capacity</th><th>Duration</th><th>Room Fee</th><th>Status</th><th class="right">Actions</th></tr></thead>
+        <tbody>
+        <?php foreach ($rooms as $r):
+            $rdata = ['id' => (int)$r['id'], 'name' => $r['name'], 'description' => $r['description'] ?? '',
+                      'min_guests' => (int)$r['min_guests'], 'max_guests' => (int)$r['max_guests'],
+                      'duration' => (int)$r['duration_minutes'], 'price' => (float)$r['price'], 'active' => (int)$r['active'], 'image' => $r['image'] ?? ''];
+        ?>
+            <tr>
+                <td><div class="thumb"><?= bv_thumb($r['image'] ?? '', '⌂') ?></div></td>
+                <td><strong><?= bv_h($r['name']) ?></strong><small class="clamp"><?= bv_h($r['description'] ?? '') ?></small></td>
+                <td><?= (int)$r['min_guests'] ?>–<?= (int)$r['max_guests'] ?> guest<?= (int)$r['max_guests'] > 1 ? 's' : '' ?></td>
+                <td><?= (int)$r['duration_minutes'] ?> min</td>
+                <td><strong><?= (float)$r['price'] > 0 ? bv_money($r['price']) : 'Included' ?></strong></td>
+                <td><?= $r['active'] ? '<span class="badge b-confirmed">Active</span>' : '<span class="badge b-cancelled">Hidden</span>' ?></td>
+                <td class="right"><div class="actions">
+                    <button type="button" class="btn btn-sm" data-room="<?= bv_h(json_encode($rdata, JSON_UNESCAPED_UNICODE)) ?>">Edit</button>
+                    <form method="post" class="inline">
+                        <input type="hidden" name="csrf" value="<?= bv_h($csrf) ?>"><input type="hidden" name="back" value="<?= bv_h($backQs) ?>">
+                        <input type="hidden" name="op" value="toggle_room"><input type="hidden" name="room_id" value="<?= (int)$r['id'] ?>">
+                        <button class="btn btn-sm btn-ghost"><?= $r['active'] ? 'Deactivate' : 'Activate' ?></button>
+                    </form>
+                    <form method="post" class="inline">
+                        <input type="hidden" name="csrf" value="<?= bv_h($csrf) ?>"><input type="hidden" name="back" value="<?= bv_h($backQs) ?>">
+                        <input type="hidden" name="op" value="delete_room"><input type="hidden" name="room_id" value="<?= (int)$r['id'] ?>">
+                        <button class="btn btn-sm btn-danger">Delete</button>
+                    </form>
+                </div></td>
+            </tr>
+        <?php endforeach; ?>
+        </tbody>
+    </table></div></div>
+    <?php endif; ?>
+
+<?php elseif ($tab === 'addons'): ?>
+    <div class="page-head">
+        <div>
+            <div class="eyebrow">Enhancements</div>
+            <h1>Optional Add-ons</h1>
+            <p><?= count($addons) ?> add-on<?= count($addons) === 1 ? '' : 's' ?> · shown in the Optional Add-ons dropdown</p>
+        </div>
+        <?php if ($hasAddons): ?><button class="btn" type="button" data-new-addon>+ Add add-on</button><?php endif; ?>
+    </div>
+    <?php if (!$hasAddons): ?>
+        <div class="empty-state">The <code>addons</code> table does not exist yet. Import the updated SQL first.</div>
+    <?php elseif (!$addons): ?>
+        <div class="empty-state">No add-ons yet. Use the Add add-on button to create one.</div>
+    <?php else: ?>
+    <div class="card table-card"><div class="table-wrap"><table class="tbl" style="min-width:680px">
+        <thead><tr><th>Name &amp; description</th><th>Price</th><th>Status</th><th class="right">Actions</th></tr></thead>
+        <tbody>
+        <?php foreach ($addons as $ad):
+            $adata = ['id' => (int)$ad['id'], 'kind' => 'addon', 'name' => $ad['name'], 'description' => $ad['description'] ?? '',
+                      'price' => (float)$ad['price'], 'active' => (int)$ad['active']];
+        ?>
+            <tr>
+                <td><strong><?= bv_h($ad['name']) ?></strong><small class="clamp"><?= bv_h($ad['description'] ?? '') ?></small></td>
+                <td><strong>+<?= bv_money($ad['price']) ?></strong></td>
+                <td><?= $ad['active'] ? '<span class="badge b-confirmed">Active</span>' : '<span class="badge b-cancelled">Hidden</span>' ?></td>
+                <td class="right"><div class="actions">
+                    <button type="button" class="btn btn-sm" data-addon="<?= bv_h(json_encode($adata, JSON_UNESCAPED_UNICODE)) ?>">Edit</button>
+                    <form method="post" class="inline">
+                        <input type="hidden" name="csrf" value="<?= bv_h($csrf) ?>"><input type="hidden" name="back" value="<?= bv_h($backQs) ?>">
+                        <input type="hidden" name="op" value="toggle_item"><input type="hidden" name="kind" value="addon"><input type="hidden" name="item_id" value="<?= (int)$ad['id'] ?>">
+                        <button class="btn btn-sm btn-ghost"><?= $ad['active'] ? 'Deactivate' : 'Activate' ?></button>
+                    </form>
+                    <form method="post" class="inline">
+                        <input type="hidden" name="csrf" value="<?= bv_h($csrf) ?>"><input type="hidden" name="back" value="<?= bv_h($backQs) ?>">
+                        <input type="hidden" name="op" value="delete_item"><input type="hidden" name="kind" value="addon"><input type="hidden" name="item_id" value="<?= (int)$ad['id'] ?>">
+                        <button class="btn btn-sm btn-danger">Delete</button>
+                    </form>
+                </div></td>
+            </tr>
+        <?php endforeach; ?>
+        </tbody>
+    </table></div></div>
     <?php endif; ?>
 
 <?php elseif ($tab === 'preview'): ?>
@@ -1060,7 +1312,19 @@ dialog.cf { width:min(440px,92vw); }
         <label>Email<input type="email" name="email" required maxlength="150"></label>
         <label>Phone<input type="tel" name="phone" required maxlength="12" inputmode="numeric" placeholder="09XXXXXXXXX"></label>
 
-        <div class="sect">Treatments</div>
+        <?php if ($rooms): ?>
+        <div class="sect">Room</div>
+        <label class="full">Suite / Room
+            <select name="room_id">
+                <option value="">No specific room</option>
+                <?php foreach ($rooms as $r): ?>
+                    <option value="<?= (int)$r['id'] ?>"><?= bv_h($r['name']) ?> (<?= (int)$r['min_guests'] ?>–<?= (int)$r['max_guests'] ?> guests · <?= (float)$r['price'] > 0 ? bv_money($r['price']) : 'Included' ?>)</option>
+                <?php endforeach; ?>
+            </select>
+        </label>
+        <?php endif; ?>
+
+        <div class="sect">Treatments &amp; Add-ons</div>
         <div class="full">
             <div class="pick">
                 <div class="grp">Treatments</div>
@@ -1070,6 +1334,11 @@ dialog.cf { width:min(440px,92vw); }
                 <?php if ($packages): ?><div class="grp">Packages</div>
                     <?php foreach ($packages as $p): ?>
                         <label><input type="checkbox" name="items[]" value="package:<?= (int)$p['id'] ?>"><?= bv_h($p['name']) ?><?= $p['active'] ? '' : ' (hidden)' ?><span class="pr"><?= bv_money($p['price']) ?></span></label>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+                <?php if ($addons): ?><div class="grp">Optional Add-ons</div>
+                    <?php foreach ($addons as $ad): ?>
+                        <label><input type="checkbox" name="items[]" value="addon:<?= (int)$ad['id'] ?>">+ <?= bv_h($ad['name']) ?><?= $ad['active'] ? '' : ' (hidden)' ?><span class="pr"><?= bv_money($ad['price']) ?></span></label>
                     <?php endforeach; ?>
                 <?php endif; ?>
             </div>
@@ -1111,7 +1380,35 @@ dialog.cf { width:min(440px,92vw); }
 </form>
 </dialog>
 
-<!-- ===== Treatment / package dialog ===== -->
+<!-- ===== Room dialog ===== -->
+<dialog id="roomDialog">
+<form method="post" id="roomForm" enctype="multipart/form-data" autocomplete="off">
+    <input type="hidden" name="csrf" value="<?= bv_h($csrf) ?>">
+    <input type="hidden" name="back" value="<?= bv_h($backQs) ?>">
+    <input type="hidden" name="op" value="save_room">
+    <input type="hidden" name="room_id" value="">
+    <div class="dlg-head"><h3 id="roomTitle">Add room</h3><button type="button" class="dlg-x" data-close>&times;</button></div>
+    <div class="dlg-body"><div class="fgrid">
+        <label class="full">Room Name<input type="text" name="room_name" required maxlength="120"></label>
+        <label class="full">Description<textarea name="description" maxlength="1000" placeholder="Shown on the booking page"></textarea></label>
+        <label>Minimum Guests<input type="number" name="min_guests" min="1" max="6" required value="1"></label>
+        <label>Maximum Guests<input type="number" name="max_guests" min="1" max="6" required value="1"></label>
+        <label>Duration (minutes)<input type="number" name="duration" min="5" max="600" step="5" required value="60"></label>
+        <label>Room Fee (₱)<input type="number" name="price" min="0" step="0.01" required value="0"></label>
+        <div class="full">
+            <label>Picture (JPG, PNG or WEBP, max 3 MB)<input type="file" name="image" accept="image/jpeg,image/png,image/webp"></label>
+            <div class="preview" id="roomPreview" hidden></div>
+        </div>
+        <label class="check full"><input type="checkbox" name="is_active" value="1" checked> Show on the booking page</label>
+    </div></div>
+    <div class="dlg-foot">
+        <button type="button" class="btn btn-light" data-close>Cancel</button>
+        <button type="submit" class="btn">Save</button>
+    </div>
+</form>
+</dialog>
+
+<!-- ===== Treatment / package / add-on dialog ===== -->
 <dialog id="itemDialog">
 <form method="post" id="itemForm" enctype="multipart/form-data" autocomplete="off">
     <input type="hidden" name="csrf" value="<?= bv_h($csrf) ?>">
@@ -1123,9 +1420,9 @@ dialog.cf { width:min(440px,92vw); }
     <div class="dlg-body"><div class="fgrid">
         <label class="full">Name<input type="text" name="item_name" required maxlength="120"></label>
         <label class="full">Description<textarea name="description" maxlength="1000" placeholder="Shown on the booking page"></textarea></label>
-        <label>Duration (minutes)<input type="number" name="duration" min="5" max="600" step="5" required value="60"></label>
+        <label id="itemDurWrap">Duration (minutes)<input type="number" name="duration" min="5" max="600" step="5" required value="60"></label>
         <label>Price (₱)<input type="number" name="price" min="0" step="0.01" required></label>
-        <div class="full">
+        <div class="full" id="itemImgWrap">
             <label>Picture (JPG, PNG or WEBP, max 3 MB)<input type="file" name="image" accept="image/jpeg,image/png,image/webp"></label>
             <div class="preview" id="itemPreview" hidden></div>
         </div>
@@ -1213,6 +1510,7 @@ function openAppt(d) {
     af.elements.appointment_date.min = d ? '' : TODAY;
     af.dataset.origDate = d ? d.date : '';
     af.dataset.origTime = d ? d.time : '';
+    if (af.elements.room_id) af.elements.room_id.value = d && d.room_id ? d.room_id : '';
     if (d) {
         af.elements.customer_name.value = d.name;
         af.elements.email.value = d.email;
@@ -1239,7 +1537,40 @@ document.querySelectorAll('[data-appt]').forEach(b => b.addEventListener('click'
 document.querySelectorAll('[data-new-appt]').forEach(b => b.addEventListener('click', () => openAppt(null)));
 af.elements.phone.addEventListener('input', e => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 12); });
 
-/* ---- treatment / package dialog ---- */
+/* ---- room dialog ---- */
+const roomDlg = document.getElementById('roomDialog');
+const rf = document.getElementById('roomForm');
+const roomPrev = document.getElementById('roomPreview');
+function openRoom(d) {
+    rf.reset();
+    rf.elements.room_id.value = d ? d.id : '';
+    document.getElementById('roomTitle').textContent = d ? 'Edit room' : 'Add room';
+    if (d) {
+        rf.elements.room_name.value = d.name;
+        rf.elements.description.value = d.description;
+        rf.elements.min_guests.value = d.min_guests;
+        rf.elements.max_guests.value = d.max_guests;
+        rf.elements.duration.value = d.duration;
+        rf.elements.price.value = d.price;
+        rf.elements.is_active.checked = !!d.active;
+    }
+    roomPrev.hidden = !(d && d.image);
+    roomPrev.innerHTML = d && d.image ? '<img src="' + d.image.replace(/"/g, '&quot;') + '" alt="">' : '';
+    roomDlg.showModal();
+}
+document.querySelectorAll('[data-room]').forEach(b => b.addEventListener('click', () => openRoom(JSON.parse(b.dataset.room))));
+document.querySelectorAll('[data-new-room]').forEach(b => b.addEventListener('click', () => openRoom(null)));
+rf.elements.image.addEventListener('change', e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    roomPrev.hidden = false;
+    roomPrev.innerHTML = '';
+    const img = document.createElement('img');
+    img.src = URL.createObjectURL(f);
+    roomPrev.appendChild(img);
+});
+
+/* ---- treatment / package / add-on dialog ---- */
 const itemDlg = document.getElementById('itemDialog');
 const itf = document.getElementById('itemForm');
 const prev = document.getElementById('itemPreview');
@@ -1248,21 +1579,28 @@ function openItem(kind, d) {
     itf.reset();
     itf.elements.kind.value = kind;
     itf.elements.item_id.value = d ? d.id : '';
-    const noun = kind === 'package' ? 'package' : 'treatment';
+    const isAddon = kind === 'addon';
+    const noun = kind === 'package' ? 'package' : (isAddon ? 'add-on' : 'treatment');
     document.getElementById('itemTitle').textContent = (d ? 'Edit ' : 'Add ') + noun;
+    document.getElementById('itemDurWrap').style.display = isAddon ? 'none' : '';
+    itf.elements.duration.required = !isAddon;
+    document.getElementById('itemImgWrap').style.display = isAddon ? 'none' : '';
+
     if (d) {
         itf.elements.item_name.value = d.name;
         itf.elements.description.value = d.description;
-        itf.elements.duration.value = d.duration;
+        if (!isAddon) itf.elements.duration.value = d.duration;
         itf.elements.price.value = d.price;
         itf.elements.is_active.checked = !!d.active;
     }
-    prev.hidden = !(d && d.image);
-    prev.innerHTML = d && d.image ? '<img src="' + d.image.replace(/"/g, '&quot;') + '" alt="">' : '';
+    prev.hidden = isAddon || !(d && d.image);
+    prev.innerHTML = (!isAddon && d && d.image) ? '<img src="' + d.image.replace(/"/g, '&quot;') + '" alt="">' : '';
     itemDlg.showModal();
 }
 document.querySelectorAll('[data-item]').forEach(b => b.addEventListener('click', () => { const d = JSON.parse(b.dataset.item); openItem(d.kind, d); }));
 document.querySelectorAll('[data-new-item]').forEach(b => b.addEventListener('click', () => openItem(b.dataset.newItem, null)));
+document.querySelectorAll('[data-addon]').forEach(b => b.addEventListener('click', () => openItem('addon', JSON.parse(b.dataset.addon))));
+document.querySelectorAll('[data-new-addon]').forEach(b => b.addEventListener('click', () => openItem('addon', null)));
 itf.elements.image.addEventListener('change', e => {
     const f = e.target.files[0];
     if (!f) return;
@@ -1302,11 +1640,12 @@ function askConfirm(title, message, yesLabel, noLabel) {
     });
 }
 
-/* Decisions that need a Yes / No answer */
 const CONFIRMS = {
     delete_appointment: ['Delete this booking?', 'This will permanently remove the booking and cannot be undone.', 'Yes, delete'],
+    delete_room:        ['Delete this room?', 'This will permanently remove the room and cannot be undone.', 'Yes, delete'],
     delete_item:        ['Delete this item?', 'This will permanently remove it and cannot be undone.', 'Yes, delete'],
     save_appointment:   ['Save this booking?', 'The booking details, total and down payment will be updated.', 'Yes, save'],
+    save_room:          ['Save room changes?', 'The booking page will show the updated room details.', 'Yes, save'],
     save_item:          ['Save your changes?', 'The booking page will show the updated details.', 'Yes, save'],
     delete_admin:       ['Delete this admin?', 'This account will no longer be able to sign in.', 'Yes, delete'],
     logout:             ['Log out?', 'You will need to sign in again to manage bookings.', 'Yes, log out']
@@ -1315,7 +1654,7 @@ document.querySelectorAll('form').forEach(f => {
     const opEl = f.querySelector('input[name="op"]');
     if (!opEl) return;
     let c = CONFIRMS[opEl.value];
-    if (opEl.value === 'toggle_item') {
+    if (opEl.value === 'toggle_item' || opEl.value === 'toggle_room') {
         const label = (f.querySelector('button') || {}).textContent.trim();
         c = [label + ' this item?', label === 'Deactivate' ? 'It will be hidden from the booking page.' : 'It will appear on the booking page.', 'Yes, ' + label.toLowerCase()];
     }
@@ -1330,7 +1669,6 @@ document.addEventListener('submit', async e => {
     if (ok) { f.dataset.ok = '1'; f.requestSubmit(); }
 });
 
-/* Status dropdowns in the table */
 document.querySelectorAll('select[data-confirm-select]').forEach(sel => {
     sel.dataset.orig = sel.value;
     sel.addEventListener('change', async () => {
@@ -1350,8 +1688,7 @@ document.querySelectorAll('select[data-confirm-select]').forEach(sel => {
     });
 });
 
-
-/* ---- admin account dialog (add / reset password) ---- */
+/* ---- admin account dialog ---- */
 const adminDlg = document.getElementById('adminDialog');
 const adminForm = document.getElementById('adminForm');
 function openAdmin(account) {
@@ -1377,7 +1714,7 @@ const checkPasswordsMatch = () => repeatField.setCustomValidity(repeatField.valu
 passwordField.addEventListener('input', checkPasswordsMatch);
 repeatField.addEventListener('input', checkPasswordsMatch);
 
-/* ---- keep the full-size booking page exactly as tall as the space under the top bar ---- */
+/* ---- iframe height ---- */
 (function () {
     const topBar = document.querySelector('.topbar');
     const setHeight = () => document.documentElement.style.setProperty('--topbar-h', topBar.offsetHeight + 'px');
