@@ -23,8 +23,6 @@ $services = $pdo->query('SELECT * FROM services WHERE active = 1 ORDER BY id')->
     .bv-social h4{margin:0 0 6px;font-size:14px;font-weight:500}
     .bv-social a{display:inline-flex;align-items:center;gap:8px}
     .bv-social svg{width:16px;height:16px;flex-shrink:0}
-    .hero-track{margin-left:12px}
-    @media(max-width:560px){.hero-track{margin:14px 0 0}}
   </style>
 </head>
 <body>
@@ -44,7 +42,6 @@ $services = $pdo->query('SELECT * FROM services WHERE active = 1 ORDER BY id')->
     <h1>Pause. Breathe.<br><em>Come back to you.</em></h1>
     <p class="hero-copy">Discover thoughtful treatments and peaceful moments at Bella Vista Oasis Spa — your space to unwind, restore, and feel renewed.</p>
     <a class="button button-light" href="book.php">Reserve Your Escape <span>→</span></a>
-    <a class="button button-outline hero-track" href="track.php">Track My Booking</a>
     <div class="hero-note">HOLISTIC WELLNESS · DEEP RELAXATION · PERSONAL CARE</div>
   </div>
   <div class="hero-stamp"><span>YOUR</span><strong>OASIS</strong><span>AWAITS</span></div>
