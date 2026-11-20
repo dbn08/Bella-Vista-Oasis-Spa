@@ -189,13 +189,14 @@ $bookingConfig = [
     --bv-line: #e4d9cb;
     --bv-line-strong: #d9cfc2;
     --bv-font-display: "Cormorant Garamond", Georgia, serif;
+    --bv-font-body: "Jost", system-ui, -apple-system, "Segoe UI", sans-serif;
     --bv-radius-card: 20px;
     --bv-radius-pill: 999px;
     --bv-btn-height: 42px;
 }
 
 .site-header { min-height: 0 !important; padding-top: 10px !important; padding-bottom: 10px !important; }
-.site-header .brand-mark { width: 38px !important; height: 38px !important; }
+.site-header .brand-mark { width: 64px !important; height: 44px !important; }
 .booking-layout { display: grid !important; grid-template-columns: 300px minmax(0, 1fr) !important; }
 .booking-aside { width: auto !important; max-width: none !important; min-width: 0 !important; padding: 28px 28px !important; }
 .booking-aside h1 { font-size: clamp(30px, 2.3vw, 40px) !important; line-height: 1.12 !important; }
@@ -218,18 +219,27 @@ $bookingConfig = [
 @media (max-width: 900px) { .booking-layout { grid-template-columns: 1fr !important; } }
 
 .field-error { display: block; margin-top: 5px; color: var(--bv-red) !important; font-size: 12px !important; }
-.invalid-input { border-color: var(--bv-red) !important; background: var(--bv-red-soft) !important; box-shadow: 0 0 0 3px rgba(184, 50, 50, .12) !important; }
-.valid-input { border-color: var(--bv-green) !important; box-shadow: 0 0 0 3px rgba(100, 133, 104, .12) !important; }
+.form-grid input.invalid-input,
+.invalid-input {
+    border-color: var(--bv-red) !important;
+    background: var(--bv-red-soft) !important;
+    box-shadow: 0 0 0 3px rgba(184, 50, 50, .14) !important;
+}
+.form-grid input.valid-input,
+.valid-input {
+    border-color: var(--bv-green) !important;
+    box-shadow: 0 0 0 3px rgba(100, 133, 104, .12) !important;
+}
 
 /* Stepper & Buttons */
-.stepper { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 0; margin: 0; padding: 9px 18px; list-style: none; background: var(--bv-sand); border-radius: var(--bv-radius-pill); }
-.stepper li { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--bv-muted-soft); cursor: default; }
+.stepper { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 0; margin: 0; padding: 10px 20px; list-style: none; background: var(--bv-sand); border-radius: var(--bv-radius-pill); }
+.stepper li { display: flex; align-items: center; gap: 9px; font-size: 13.5px; color: var(--bv-muted-soft); cursor: default; }
+.stepper li::before { content: ""; flex: 0 0 9px; width: 9px; height: 9px; border: 1.5px solid #b8aa9a; border-radius: 50%; background: transparent; transition: background .2s, border-color .2s, box-shadow .2s; }
 .stepper li:not(:last-child)::after { content: "›"; margin: 0 12px; color: #b8aa9a; font-size: 16px; }
-.stepper .num { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border: 1px solid #c9bba9; border-radius: 50%; background: var(--bv-card); font-size: 12px; }
 .stepper li.active { color: var(--bv-ink); font-weight: 600; }
-.stepper li.active .num { background: var(--bv-brown); border-color: var(--bv-brown); color: #fff; }
+.stepper li.active::before { background: var(--sage-700, #4f6b55); border-color: var(--sage-700, #4f6b55); box-shadow: 0 0 0 3px rgba(79, 107, 85, .18); }
 .stepper li.done { color: var(--bv-green); cursor: pointer; }
-.stepper li.done .num { background: var(--bv-green); border-color: var(--bv-green); color: #fff; }
+.stepper li.done::before { background: var(--bv-green); border-color: var(--bv-green); }
 
 .bv-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 150px; max-width: 100%; height: var(--bv-btn-height); padding: 0 14px; border: 1px solid var(--bv-brown); border-radius: var(--bv-radius-pill); font: inherit; font-size: 12px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; white-space: nowrap; cursor: pointer; transition: background .15s, color .15s; }
 .bv-btn--primary { background: var(--bv-brown); color: #fff; }
@@ -250,52 +260,53 @@ $bookingConfig = [
 .choice-panel.active { display: block; }
 
 .slider { position: relative; }
-.choice-list { display: flex; gap: 20px; margin: 0; padding: 14px 6px 22px; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; scroll-behavior: smooth; scrollbar-width: none; }
+.choice-list { display: flex; gap: 22px; margin: 0; padding: 14px 6px 22px; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; scroll-behavior: smooth; scrollbar-width: none; }
 .choice-list::-webkit-scrollbar { display: none; }
-.slider-btn { position: absolute; top: 32%; z-index: 5; display: flex; align-items: center; justify-content: center; width: 42px; height: 42px; padding: 0; border: 1px solid var(--bv-line-strong); border-radius: 50%; background: var(--bv-card); color: var(--bv-brown); font-size: 22px; cursor: pointer; box-shadow: 0 6px 16px rgba(63, 45, 32, .14); }
+.slider-btn { position: absolute; top: 44%; z-index: 5; display: flex; align-items: center; justify-content: center; width: 42px; height: 42px; padding: 0; border: 1px solid var(--bv-line-strong); border-radius: 50%; background: var(--bv-card); color: var(--bv-brown); font-size: 22px; cursor: pointer; box-shadow: 0 6px 16px rgba(63, 45, 32, .14); }
 .slider-btn:hover { background: var(--bv-brown); color: #fff; }
 .slider-btn.prev { left: -14px; }
 .slider-btn.next { right: -14px; }
 .slider-btn:disabled { opacity: 0; pointer-events: none; }
 
-/* Curved Cards (Shared by Rooms, Treatments, and Packages) */
-.choice-card { position: relative; display: flex; flex: 0 0 clamp(235px, 31%, 295px); flex-direction: column; padding: 14px 14px 18px; border: 1px solid var(--bv-line); border-radius: 28px; background: var(--bv-card); font-weight: 400; cursor: pointer; scroll-snap-align: start; transition: transform .25s ease, box-shadow .25s ease, border-color .2s; }
+/* Full-Arch Framed Cards (Matching Homepage Style) */
+.choice-card { position: relative; display: flex; flex: 0 0 clamp(255px, 31%, 305px); flex-direction: column; justify-content: flex-end; min-height: 430px; padding: 7px; border: 1px solid rgba(90, 64, 48, .55); border-radius: 220px 220px 18px 18px; background: transparent; font-weight: 400; cursor: pointer; scroll-snap-align: start; transition: transform .25s ease, box-shadow .25s ease, border-color .2s; }
 .choice-card input[type="radio"] { position: absolute; opacity: 0; pointer-events: none; }
-.choice-card:hover:not(.is-disabled) { z-index: 2; transform: translateY(-4px); box-shadow: 0 14px 28px rgba(90, 64, 48, .15); }
-.choice-card.selected { border-color: var(--bv-green); background: var(--bv-green-soft); box-shadow: 0 0 0 1px var(--bv-green) inset; }
+.choice-card:hover:not(.is-disabled) { z-index: 2; transform: translateY(-4px); border-color: var(--bv-brown); box-shadow: 0 16px 32px rgba(45, 30, 18, .22); }
+.choice-card.selected { border-color: var(--bv-green); box-shadow: 0 0 0 2px var(--bv-green), 0 14px 28px rgba(100, 133, 104, .22); }
 .choice-card.is-disabled { opacity: .48; cursor: not-allowed; filter: grayscale(.3); }
 .choice-card[hidden] { display: none !important; }
 
-.choice-badge { position: absolute; top: 24px; right: 24px; z-index: 1; padding: 4px 10px; border-radius: var(--bv-radius-pill); background: rgba(63,45,32,.88); color: #fff; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; }
-.choice-thumb { display: flex; align-items: center; justify-content: center; aspect-ratio: 1 / 1.08; overflow: hidden; border-radius: 50% 50% 16px 16px / 40% 40% 16px 16px; background: linear-gradient(160deg, #f1e6d6, #d8c4a8); }
+.choice-badge { position: absolute; top: 24px; left: 50%; transform: translateX(-50%); z-index: 2; padding: 4px 12px; border: 1px solid rgba(255, 255, 255, .25); border-radius: var(--bv-radius-pill); background: rgba(28, 17, 10, .72); backdrop-filter: blur(4px); color: #f7efe4; font-size: 10px; font-weight: 500; letter-spacing: .1em; text-transform: uppercase; white-space: nowrap; }
+.choice-thumb { position: absolute; inset: 7px; z-index: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 213px 213px 12px 12px; background: linear-gradient(160deg, #6e543e, #362417); }
+.choice-thumb::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(32, 20, 12, .04) 0%, rgba(32, 20, 12, .16) 36%, rgba(28, 17, 10, .85) 62%, rgba(22, 13, 8, .96) 100%); pointer-events: none; }
 .choice-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; transition: transform .5s ease; }
 .choice-card:hover:not(.is-disabled) .choice-thumb img { transform: scale(1.06); }
-.thumb-ph { color: #a8896a; font-size: 42px; }
+.thumb-ph { position: relative; z-index: 1; margin-bottom: 140px; color: rgba(247, 239, 228, .45); font-size: 46px; }
 
-.choice-body { display: flex; flex: 1; flex-direction: column; gap: 8px; padding: 14px 6px 0; }
-.choice-name { color: var(--bv-ink); font-family: var(--bv-font-display); font-size: 21px; font-weight: 600; line-height: 1.2; }
-.choice-desc { display: -webkit-box; min-height: 4.5em; overflow: hidden; color: var(--bv-muted); font-size: 13px; line-height: 1.5; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
-.choice-facts { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 10px; border-top: 1px dashed #e0d4c3; flex-wrap: wrap; }
-.choice-facts .fact { color: var(--bv-muted); font-size: 12.5px; }
-.choice-facts .fact.price { color: var(--bv-brown); font-size: 16.5px; font-weight: 700; }
+.choice-body { position: relative; z-index: 1; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 6px 10px; padding: 175px 18px 18px; }
+.choice-facts { display: contents; }
+.choice-facts .fact:not(.price) { grid-column: 1 / -1; order: 1; color: rgba(247, 239, 228, .78); font-size: 10.5px; font-weight: 500; letter-spacing: .14em; text-transform: uppercase; }
+.choice-name { grid-column: 1 / -1; order: 2; color: #ffffff; font-family: var(--bv-font-display); font-size: 23px; font-weight: 600; line-height: 1.18; }
+.choice-desc { grid-column: 1 / -1; order: 3; display: -webkit-box; min-height: 4.2em; margin-bottom: 6px; overflow: hidden; color: rgba(247, 239, 228, .84); font-size: 12.5px; line-height: 1.45; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.choice-facts .fact.price { grid-column: 1; order: 4; color: #ffffff; font-family: var(--bv-font-display); font-size: 18px; font-weight: 600; white-space: nowrap; }
 
-.choice-btn { display: flex; align-items: center; justify-content: center; height: var(--bv-btn-height); margin-top: auto; border: 1px solid var(--bv-brown); border-radius: var(--bv-radius-pill); background: var(--bv-sand); color: var(--bv-brown); font-size: 12px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; cursor: pointer; }
+.choice-btn { grid-column: 2; justify-self: end; order: 5; display: inline-flex; align-items: center; justify-content: center; height: 36px; padding: 0 14px; border: 1px solid rgba(255, 255, 255, .48); border-radius: var(--bv-radius-pill); background: rgba(26, 16, 10, .45); backdrop-filter: blur(4px); color: #ffffff; font-size: 10.5px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; white-space: nowrap; cursor: pointer; transition: background .18s, border-color .18s, color .18s; }
 .choice-btn .on { display: none; }
-.choice-card:hover:not(.is-disabled) .choice-btn { background: var(--bv-brown); color: #fff; }
-.choice-card.selected .choice-btn { border-color: var(--bv-green); background: var(--bv-green); color: #fff; }
+.choice-card:hover:not(.is-disabled) .choice-btn { border-color: #ffffff; background: rgba(255, 255, 255, .16); color: #ffffff; }
+.choice-card.selected .choice-btn { border-color: var(--bv-green); background: var(--bv-green); color: #ffffff; }
 .choice-card.selected .choice-btn .on { display: inline; }
 .choice-card.selected .choice-btn .off { display: none; }
 
 /* For Guest Dropdown inside each Treatment Card */
-.guest-assign-wrap { position: relative; margin-top: 6px; }
+.guest-assign-wrap { grid-column: 1 / -1; order: 6; position: relative; margin-top: 6px; }
 .guest-assign-wrap[hidden] { display: none !important; }
-.guest-dd-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 8px 12px; border-radius: var(--bv-radius-pill); border: 1px solid var(--bv-line-strong); background: #fff; color: var(--bv-ink); font: inherit; font-size: 12px; cursor: pointer; transition: border-color .15s; }
-.guest-dd-trigger:hover, .guest-dd-trigger[aria-expanded="true"] { border-color: var(--bv-brown); }
+.guest-dd-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 7px 12px; border-radius: var(--bv-radius-pill); border: 1px solid rgba(255, 255, 255, .32); background: rgba(255, 255, 255, .94); color: var(--bv-ink); font: inherit; font-size: 12px; cursor: pointer; transition: border-color .15s; }
+.guest-dd-trigger:hover, .guest-dd-trigger[aria-expanded="true"] { border-color: #ffffff; background: #ffffff; }
 .guest-dd-trigger strong { color: var(--bv-green); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .guest-dd-trigger strong.is-empty { color: var(--bv-muted); font-weight: 500; }
 .guest-dd-caret { font-size: 11px; color: var(--bv-muted); transition: transform .2s; flex-shrink: 0; }
 .guest-dd-trigger[aria-expanded="true"] .guest-dd-caret { transform: rotate(180deg); }
-.guest-dd-menu { margin-top: 6px; padding: 6px; border-radius: 14px; background: #fff; border: 1px solid var(--bv-line); box-shadow: 0 8px 20px rgba(63,45,32,.12); max-height: 150px; overflow-y: auto; }
+.guest-dd-menu { margin-top: 6px; padding: 6px; border-radius: 14px; background: #fff; border: 1px solid var(--bv-line); box-shadow: 0 8px 20px rgba(63,45,32,.22); max-height: 150px; overflow-y: auto; }
 .guest-dd-menu[hidden] { display: none !important; }
 .guest-dd-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; font-size: 12.5px; color: var(--bv-ink); cursor: pointer; user-select: none; }
 .guest-dd-item:hover { background: var(--bv-sand-soft); }
@@ -447,6 +458,16 @@ $bookingConfig = [
 dialog.cf { width: min(420px, 92vw); padding: 0; border: 0; border-radius: 24px; background: var(--bv-card); box-shadow: 0 30px 80px rgba(63, 45, 32, .35); }
 .cf-body { padding: 32px 30px 6px; text-align: center; }
 .cf-foot { display: flex; justify-content: center; gap: 10px; padding: 22px 30px 28px; }
+
+/* ---------- Typography: Cormorant Garamond (headings) + Jost (text) ---------- */
+.booking-form-wrap { font-family: var(--bv-font-body); }
+.booking-form-wrap h3, .booking-form-wrap h4, dialog.cf h3 { font-family: var(--bv-font-display); font-weight: 600; letter-spacing: .005em; color: var(--bv-ink); }
+.step-head h3 { font-size: 30px; line-height: 1.15; }
+.sub-section-title { font-size: 24px; }
+.next-box h4, .policy-box h4 { font-size: 21px; margin: 0 0 14px; }
+.form-grid label, .pay-label, .pay-sub, .addon-trigger, .guest-dd-trigger { font-family: var(--bv-font-body); }
+.form-grid label, .pay-label { font-weight: 500; letter-spacing: .02em; }
+.booking-form-wrap input, .booking-form-wrap select, .booking-form-wrap textarea, .booking-form-wrap button { font-family: var(--bv-font-body); }
 </style>
 </head>
 
@@ -488,11 +509,11 @@ dialog.cf { width: min(420px, 92vw); padding: 0; border: 0; border-radius: 24px;
     <div class="booking-head">
         <h2>Reserve your visit</h2>
         <ol class="stepper" id="stepper">
-            <li data-step="1" class="active"><span class="num">1</span><span class="lbl">Room &amp; Treatments</span></li>
-            <li data-step="2"><span class="num">2</span><span class="lbl">Date &amp; Time</span></li>
-            <li data-step="3"><span class="num">3</span><span class="lbl">Your Details</span></li>
-            <li data-step="4"><span class="num">4</span><span class="lbl">Payment</span></li>
-            <li data-step="5"><span class="num">5</span><span class="lbl">Confirmation</span></li>
+            <li data-step="1" class="active"><span class="lbl">Room &amp; Treatments</span></li>
+            <li data-step="2"><span class="lbl">Date &amp; Time</span></li>
+            <li data-step="3"><span class="lbl">Your Details</span></li>
+            <li data-step="4"><span class="lbl">Payment</span></li>
+            <li data-step="5"><span class="lbl">Confirmation</span></li>
         </ol>
     </div>
 
@@ -503,7 +524,7 @@ dialog.cf { width: min(420px, 92vw); padding: 0; border: 0; border-radius: 24px;
     <!-- STEP 1: GUESTS, ROOM, TREATMENTS & ADD-ONS -->
     <div class="step-panel active" data-step="1">
         <div class="step-head">
-            <h3>1. Guests &amp; Room Selection</h3>
+            <h3>Guests &amp; Room Selection</h3>
         </div>
         <div class="form-grid" style="max-width:340px; margin-bottom: 14px;">
             <label>
@@ -553,7 +574,7 @@ dialog.cf { width: min(420px, 92vw); padding: 0; border: 0; border-radius: 24px;
         <small class="field-error" id="roomError"></small>
 
         <div class="sub-section-title">
-            <span>2. Select Treatments &amp; Packages</span>
+            <span>Select Treatments &amp; Packages</span>
         </div>
 
         <?php if ($packages): ?>
@@ -1467,16 +1488,45 @@ window.BOOKING_CONFIG = <?= json_encode($bookingConfig, JSON_UNESCAPED_UNICODE) 
     })();
 
     /* ---------- Live Field Validation (Step 3) ---------- */
+    let nameTouched = false;
+
     function validateNameField(showEmpty = true) {
         const val = nameInput.value.trim();
+        const words = val.split(/\s+/).filter(Boolean);
+        const validSuffixes = /^(jr\.?|sr\.?|ii|iii|iv|v)$/i;
         let msg = '';
-        if (!val) { if (showEmpty) msg = 'Please enter your full name.'; }
-        else if (/^\d/.test(val)) msg = 'Name must not start with a number.';
-        else if (!/^[a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s.'-]*$/.test(val)) msg = 'Please enter a valid name.';
+
+        if (!val) {
+            if (showEmpty || nameTouched) msg = 'Please enter your full name.';
+        } else if (/\d/.test(val)) {
+            msg = 'Full name must not contain numbers.';
+        } else if (!/^[a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s.'-]*$/.test(val)) {
+            msg = 'Please enter a valid name (letters only).';
+        } else if (words.length < 2) {
+            msg = 'Please enter both your first and last name.';
+        } else if (
+            /(.)\1{2,}/i.test(val) ||
+            /[bcdfghjklmnpqrstvwxz]{5,}/i.test(val) ||
+            /(qwerty|asdf|zxcv|hjkl)/i.test(val)
+        ) {
+            msg = 'Please enter a real full name.';
+        } else {
+            const hasInvalidWord = words.some(w => {
+                if (validSuffixes.test(w)) return false;
+                if (/^[a-zA-ZÀ-ÿ]\.$/.test(w)) return false;
+                const lettersOnly = w.replace(/[^a-zA-ZÀ-ÿ]/g, '');
+                return lettersOnly.length < 2 || !/[aeiouyÀ-ÖØ-öø-ÿ]/i.test(lettersOnly);
+            });
+            if (hasInvalidWord) {
+                msg = 'Please enter a valid first and last name.';
+            }
+        }
+
+        const isValid = !msg && val.length > 0;
         byId('nameError').textContent = msg;
         nameInput.classList.toggle('invalid-input', !!msg);
-        nameInput.classList.toggle('valid-input', !msg && val.length > 0);
-        return !msg && val.length > 0;
+        nameInput.classList.toggle('valid-input', isValid);
+        return isValid;
     }
 
     function validateEmailField(showEmpty = true) {
@@ -1504,8 +1554,14 @@ window.BOOKING_CONFIG = <?= json_encode($bookingConfig, JSON_UNESCAPED_UNICODE) 
         return !msg && val.length > 0;
     }
 
-    nameInput.addEventListener('input', () => validateNameField(false));
-    nameInput.addEventListener('blur', () => validateNameField(true));
+    nameInput.addEventListener('input', () => {
+        nameTouched = true;
+        validateNameField(false);
+    });
+    nameInput.addEventListener('blur', () => {
+        nameTouched = true;
+        validateNameField(true);
+    });
     emailInput.addEventListener('input', () => validateEmailField(false));
     emailInput.addEventListener('blur', () => validateEmailField(true));
     phoneInput.addEventListener('input', () => validatePhoneField(false));
@@ -1541,6 +1597,7 @@ window.BOOKING_CONFIG = <?= json_encode($bookingConfig, JSON_UNESCAPED_UNICODE) 
             return true;
         }
         if (step === 3) {
+            nameTouched = true;
             const nameOk = validateNameField(true);
             const emailOk = validateEmailField(true);
             const phoneOk = validatePhoneField(true);
