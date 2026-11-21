@@ -353,3 +353,55 @@ try {
   else document.addEventListener('DOMContentLoaded', init);
 })();
 } catch (err) { console.error("Footer social links failed:", err); }
+
+/* Bella Vista - touchpad swipe para sa Treatment slider.
+   Hindi inaalis ang arrows. Ang two-finger swipe sa touchpad ay
+   kusang pumipindot sa prev/next arrow ng slider. */
+(function () {
+    'use strict';
+
+    var THRESHOLD = 40;   // lakas ng swipe bago gumalaw
+    var COOLDOWN = 650;   // ms, isang slide lang bawat swipe
+    var IDLE_GAP = 140;   // ms na walang wheel event bago ma-reset
+
+    var acc = 0;
+    var locked = false;
+    var lockedAt = 0;
+    var idleTimer = null;
+
+    document.addEventListener('wheel', function (e) {
+        var viewport = e.target.closest && e.target.closest('.menu-viewport');
+        if (!viewport) return;
+
+        // Horizontal swipe lang; hindi ginagalaw ang vertical scroll
+        if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+
+        var scope = viewport.closest('section') || document;
+        var arrows = scope.querySelectorAll('.menu-arrow');
+        if (arrows.length < 2) return;
+        var prev = arrows[0];
+        var next = arrows[arrows.length - 1];
+
+        e.preventDefault(); // iwas browser back/forward swipe
+
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(function () {
+            acc = 0;
+            if (Date.now() - lockedAt >= COOLDOWN) locked = false;
+        }, IDLE_GAP);
+
+        if (locked) {
+            if (Date.now() - lockedAt >= COOLDOWN && Math.abs(e.deltaX) < 4) locked = false;
+            return;
+        }
+
+        acc += e.deltaX;
+        if (Math.abs(acc) >= THRESHOLD) {
+            var btn = acc > 0 ? next : prev;
+            if (!btn.disabled) btn.click();
+            acc = 0;
+            locked = true;
+            lockedAt = Date.now();
+        }
+    }, { passive: false });
+})();
