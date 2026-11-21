@@ -47,11 +47,11 @@ $services = $pdo->query('SELECT * FROM services WHERE active = 1 ORDER BY id')->
   <div class="hero-stamp"><span>YOUR</span><strong>OASIS</strong><span>AWAITS</span></div>
 </section>
 <section class="intro section" id="about">
-  <div class="intro-art"><div class="art-circle"><span>BV</span><small>EST. 2021</small></div><div class="art-caption">A gentler pace.<br>A clearer mind.</div></div>
+  <div class="intro-art"><div class="art-circle"><span>BV</span><small>EST. 2026</small></div><div class="art-caption">A gentler pace.<br>A clearer mind.</div></div>
   <div class="intro-text">
     <p class="eyebrow">Welcome to Bella Vista</p><h2>Your moment of<br><em>wellness starts here.</em></h2>
     <p>Bella Vista Oasis Spa is a peaceful sanctuary dedicated to holistic wellness, physical rejuvenation, and deep relaxation. Surrounded by nature and soothing aesthetics, we offer premium massage therapies, therapeutic treatments, and private lounge experiences designed to melt away stress and restore body and mind.</p>
-    <p>Established in 2021 as a vital extension of the Bella Vista estate, the spa grew from a commitment to provide guests with an unmatched healing touch. Today, it is a trusted wellness destination for local residents and visitors seeking professional relaxation therapies.</p>
+    <p>Established in 2026 as a vital extension of the Bella Vista estate, the spa grew from a commitment to provide guests with an unmatched healing touch. Today, it is a trusted wellness destination for local residents and visitors seeking professional relaxation therapies.</p>
     <a class="text-link" href="#services">Explore our treatments <span>↗</span></a>
   </div>
 </section>
@@ -111,6 +111,7 @@ $services = $pdo->query('SELECT * FROM services WHERE active = 1 ORDER BY id')->
 
 <script src="assets/script.js"></script>
 <script src="assets/site.js"></script>
+<script src="assets/menu-swipe.js"></script>
 <script>
 /* Transparent header sa taas, solid kapag nag-scroll */
 (function () {
