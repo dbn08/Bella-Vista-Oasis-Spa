@@ -245,6 +245,45 @@ function bv_save_image(string $folder, int $id, array $file, ?string $old): ?str
     return $prefix . $name;
 }
 
+/* Payment QR codes: one file per provider in assets/images/payments/<provider>.<ext> (book.php reads them from there) */
+function bv_qr_find(string $provider): string {
+    foreach (['png', 'jpg', 'jpeg', 'webp'] as $ext) {
+        $rel = 'assets/images/payments/' . $provider . '.' . $ext;
+        if (is_file(__DIR__ . '/' . $rel)) return $rel;
+    }
+    return '';
+}
+function bv_qr_remove(string $provider): void {
+    foreach (['png', 'jpg', 'jpeg', 'webp'] as $ext) {
+        $f = __DIR__ . '/assets/images/payments/' . $provider . '.' . $ext;
+        if (is_file($f)) @unlink($f);
+    }
+}
+
+/* Payment account details (shown to customers on book.php). Table is created automatically. */
+function bv_pay_defaults(): array {
+    return [
+        'gcash'     => ['', 'Bella Vista Oasis Spa', '0917 000 0000'],
+        'maya'      => ['', 'Bella Vista Oasis Spa', '0918 000 0000'],
+        'bdo'       => ['BDO Unibank', 'Bella Vista Oasis Spa', '0000 0000 0000'],
+        'bpi'       => ['Bank of the Philippine Islands', 'Bella Vista Oasis Spa', '0000 0000 00'],
+        'unionbank' => ['UnionBank of the Philippines', 'Bella Vista Oasis Spa', '0000 0000 0000'],
+    ];
+}
+function bv_pay_accounts(PDO $pdo): array {
+    $pdo->exec("CREATE TABLE IF NOT EXISTS payment_accounts (
+        provider VARCHAR(20) NOT NULL PRIMARY KEY,
+        bank_name VARCHAR(80) NOT NULL DEFAULT '',
+        account_name VARCHAR(80) NOT NULL DEFAULT '',
+        account_number VARCHAR(40) NOT NULL DEFAULT ''
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    $ins = $pdo->prepare('INSERT IGNORE INTO payment_accounts (provider, bank_name, account_name, account_number) VALUES (?,?,?,?)');
+    foreach (bv_pay_defaults() as $p => $d) $ins->execute([$p, $d[0], $d[1], $d[2]]);
+    $out = [];
+    foreach ($pdo->query('SELECT * FROM payment_accounts')->fetchAll() as $r) $out[$r['provider']] = $r;
+    return $out;
+}
+
 function bv_remove_file(?string $path, string $prefix): void {
     if ($path && strpos($path, $prefix) === 0 && strpos($path, '..') === false) {
         @unlink(__DIR__ . '/' . $path);
@@ -563,6 +602,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         /* ----- create / update room ----- */
+        /* ----- payment QR codes ----- */
+        if ($op === 'save_account') {
+            $prov = (string)($_POST['provider'] ?? '');
+            $known = array_merge(array_keys($providers['ewallet']), array_keys($providers['bank']));
+            if (!in_array($prov, $known, true)) throw new RuntimeException('Unknown payment provider.');
+            $aname = trim(preg_replace('/\s+/', ' ', (string)($_POST['account_name'] ?? '')));
+            $anum  = trim(preg_replace('/\s+/', ' ', (string)($_POST['account_number'] ?? '')));
+            $bname = trim(preg_replace('/\s+/', ' ', (string)($_POST['bank_name'] ?? '')));
+            if (mb_strlen($aname) < 2 || mb_strlen($aname) > 80) throw new RuntimeException('Account name must be 2 to 80 characters.');
+            if (!preg_match('/^[0-9 +\-]{5,40}$/', $anum)) throw new RuntimeException('Account number: use digits, spaces, + or - only (5 to 40 characters).');
+            if (mb_strlen($bname) > 80) throw new RuntimeException('Bank name is too long.');
+            if (isset($providers['bank'][$prov]) && $bname === '') throw new RuntimeException('Bank name is required for banks.');
+            if (isset($providers['ewallet'][$prov])) $bname = '';
+            bv_pay_accounts($pdo);
+            $pdo->prepare('UPDATE payment_accounts SET bank_name = ?, account_name = ?, account_number = ? WHERE provider = ?')->execute([$bname, $aname, $anum, $prov]);
+            bv_flash('success', 'Account details saved.');
+            bv_back($back);
+        }
+
+        if ($op === 'save_qr' || $op === 'delete_qr') {
+            $prov = (string)($_POST['provider'] ?? '');
+            $known = array_merge(array_keys($providers['ewallet']), array_keys($providers['bank']));
+            if (!in_array($prov, $known, true)) throw new RuntimeException('Unknown payment provider.');
+            if ($op === 'delete_qr') {
+                bv_qr_remove($prov);
+                bv_flash('success', 'QR code removed.');
+                bv_back($back);
+            }
+            $file = $_FILES['qr'] ?? ['error' => UPLOAD_ERR_NO_FILE];
+            if (($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) throw new RuntimeException('Choose a QR code image first.');
+            if ($file['error'] !== UPLOAD_ERR_OK) throw new RuntimeException('Upload failed.');
+            if ($file['size'] > 3 * 1024 * 1024) throw new RuntimeException('Max file size is 3 MB.');
+            $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
+            $map = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
+            if (!isset($map[$mime])) throw new RuntimeException('Use JPG, PNG, or WEBP.');
+            $dir = __DIR__ . '/assets/images/payments';
+            if (!is_dir($dir) && !mkdir($dir, 0755, true)) throw new RuntimeException('Could not create the payments folder.');
+            bv_qr_remove($prov);   // replace: remove the old QR (any extension) so only the new one is used
+            if (!move_uploaded_file($file['tmp_name'], $dir . '/' . $prov . '.' . $map[$mime])) throw new RuntimeException('Could not save the QR code.');
+            bv_flash('success', 'QR code saved.');
+            bv_back($back);
+        }
+
         if ($op === 'save_room') {
             $id     = (int)($_POST['room_id'] ?? 0);
             $rname  = trim($_POST['room_name'] ?? '');
@@ -782,7 +864,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 /* ---------- Page data ---------- */
-$validTabs = ['overview', 'appointments', 'rooms', 'services', 'packages', 'addons', 'admins', 'preview'];
+$validTabs = ['overview', 'appointments', 'rooms', 'services', 'packages', 'addons', 'payments', 'admins', 'preview'];
 $tab = in_array($_GET['tab'] ?? '', $validTabs, true) ? $_GET['tab'] : 'overview';
 $fSvcCat = isset($_GET['cat']) && isset($serviceCategories[$_GET['cat']]) ? $_GET['cat'] : 'all';
 $flash = $_SESSION['flash'] ?? null;
@@ -810,6 +892,11 @@ try {
 } catch (PDOException $e) {
     $addons = [];
     $hasAddons = false;
+}
+
+$payAccounts = [];
+if ($tab === 'payments') {
+    try { $payAccounts = bv_pay_accounts($pdo); } catch (Throwable $e) { $payAccounts = []; }
 }
 
 $admins = [];
@@ -1162,6 +1249,7 @@ dialog.cf::backdrop { background:rgba(63,45,32,.55); }
             <a href="?tab=services" class="<?= $tab === 'services' ? 'active' : '' ?>">Services</a>
             <a href="?tab=packages" class="<?= $tab === 'packages' ? 'active' : '' ?>">Spa Packages</a>
             <a href="?tab=addons" class="<?= $tab === 'addons' ? 'active' : '' ?>">Add-ons</a>
+            <a href="?tab=payments" class="<?= $tab === 'payments' ? 'active' : '' ?>">Payments</a>
             <a href="?tab=admins" class="<?= $tab === 'admins' ? 'active' : '' ?>">Admins</a>
             <a href="?tab=preview" class="<?= $tab === 'preview' ? 'active' : '' ?>">Booking page</a>
         </nav>
@@ -1464,6 +1552,86 @@ dialog.cf::backdrop { background:rgba(63,45,32,.55); }
 
 <?php elseif ($tab === 'preview'): ?>
     <iframe class="preview-frame" src="book.php?preview=1" title="Booking page"></iframe>
+
+<?php elseif ($tab === 'payments'): ?>
+    <style>
+    .pay-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; margin-bottom:8px; }
+    .pay-card { padding:22px; display:flex; flex-direction:column; gap:18px; }
+    .pay-head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .pay-head h3 { margin:0; font-family:var(--serif); font-size:26px; font-weight:600; letter-spacing:.02em; }
+    .pay-body { display:grid; grid-template-columns:132px minmax(0,1fr); gap:20px; align-items:start; }
+    .pay-qrbox { width:132px; height:132px; border-radius:16px; border:1px solid var(--line); background:#fff; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+    .pay-qrbox img { width:100%; height:100%; object-fit:contain; padding:6px; }
+    .pay-qrbox.empty { border:1.5px dashed #cdbfae; background:var(--bg); color:var(--muted); font-size:13px; text-align:center; padding:10px; }
+    .pay-fields { display:grid; gap:12px; }
+    .pay-fields label { display:block; margin:0; font-size:12px; font-weight:500; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); }
+    .pay-fields input[type=text] { width:100%; margin-top:5px; font:inherit; font-size:15px; letter-spacing:0; text-transform:none; padding:10px 14px; border:1px solid var(--line); border-radius:12px; background:#fff; color:var(--ink); }
+    .pay-fields input[type=text]:focus { outline:2px solid rgba(100,133,104,.35); border-color:var(--green); }
+    .pay-fields .btn { justify-self:start; }
+    .pay-foot { display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding-top:16px; border-top:1px solid var(--line); }
+    .pay-foot form { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:0; }
+    .pay-foot input[type=file] { font-size:13px; max-width:210px; color:var(--muted); }
+    .pay-foot .spacer { flex:1; }
+    .pay-sec { margin:28px 0 12px; font-family:var(--serif); font-size:24px; font-weight:600; }
+    .pay-note { margin-top:18px; font-size:13px; color:var(--muted); }
+    @media (max-width:980px) { .pay-grid { grid-template-columns:1fr; } }
+    @media (max-width:520px) { .pay-body { grid-template-columns:1fr; } .pay-qrbox { width:100%; max-width:200px; height:200px; } .pay-card { padding:18px; } }
+    </style>
+    <div class="page-head">
+        <div>
+            <div class="eyebrow">Down payments</div>
+            <h1>Payments</h1>
+            <p>QR codes and account details shown to customers on the booking page. Edit anytime.</p>
+        </div>
+    </div>
+    <?php foreach (['ewallet' => 'E-wallets', 'bank' => 'Online banking'] as $grp => $grpLabel): ?>
+    <div class="pay-sec"><?= bv_h($grpLabel) ?></div>
+    <div class="pay-grid">
+    <?php foreach ($providers[$grp] as $pk => $pname):
+        $qr = bv_qr_find($pk);
+        $ac = $payAccounts[$pk] ?? ['bank_name' => '', 'account_name' => '', 'account_number' => '']; ?>
+        <div class="card pay-card">
+            <div class="pay-head">
+                <h3><?= bv_h($pname) ?></h3>
+                <?= $qr ? '<span class="badge b-confirmed">QR active</span>' : '<span class="badge b-cancelled">No QR yet</span>' ?>
+            </div>
+            <div class="pay-body">
+                <?php if ($qr): $qv = (int)@filemtime(__DIR__ . '/' . $qr); ?>
+                    <a class="pay-qrbox" href="<?= bv_h($qr) ?>?v=<?= $qv ?>" target="_blank" title="Open full size"><img src="<?= bv_h($qr) ?>?v=<?= $qv ?>" alt="<?= bv_h($pname) ?> QR"></a>
+                <?php else: ?><div class="pay-qrbox empty">No QR uploaded</div><?php endif; ?>
+
+                <form method="post" class="pay-fields" onsubmit="return confirm('Save the new <?= bv_h($pname) ?> account details? Customers will see them on the booking page.')">
+                    <input type="hidden" name="csrf" value="<?= bv_h($csrf) ?>"><input type="hidden" name="back" value="tab=payments">
+                    <input type="hidden" name="op" value="save_account"><input type="hidden" name="provider" value="<?= bv_h($pk) ?>">
+                    <?php if ($grp === 'bank'): ?>
+                    <label>Bank name<input type="text" name="bank_name" value="<?= bv_h($ac['bank_name']) ?>" maxlength="80" required></label>
+                    <?php endif; ?>
+                    <label>Account name<input type="text" name="account_name" value="<?= bv_h($ac['account_name']) ?>" maxlength="80" required></label>
+                    <label><?= $grp === 'bank' ? 'Account number' : 'Mobile number' ?><input type="text" name="account_number" value="<?= bv_h($ac['account_number']) ?>" maxlength="40" required></label>
+                    <button class="btn">Save details</button>
+                </form>
+            </div>
+            <div class="pay-foot">
+                <form method="post" enctype="multipart/form-data" onsubmit="return confirm('<?= $qr ? 'Replace' : 'Upload' ?> the <?= bv_h($pname) ?> QR code?<?= $qr ? ' The current QR will be removed.' : '' ?>')">
+                    <input type="hidden" name="csrf" value="<?= bv_h($csrf) ?>"><input type="hidden" name="back" value="tab=payments">
+                    <input type="hidden" name="op" value="save_qr"><input type="hidden" name="provider" value="<?= bv_h($pk) ?>">
+                    <input type="file" name="qr" accept="image/jpeg,image/png,image/webp" required>
+                    <button class="btn btn-sm"><?= $qr ? 'Replace QR' : 'Upload QR' ?></button>
+                </form>
+                <span class="spacer"></span>
+                <?php if ($qr): ?>
+                <form method="post" onsubmit="return confirm('Delete the <?= bv_h($pname) ?> QR code? Customers will no longer see it on the booking page.')">
+                    <input type="hidden" name="csrf" value="<?= bv_h($csrf) ?>"><input type="hidden" name="back" value="tab=payments">
+                    <input type="hidden" name="op" value="delete_qr"><input type="hidden" name="provider" value="<?= bv_h($pk) ?>">
+                    <button class="btn btn-sm btn-danger">Delete QR</button>
+                </form>
+                <?php endif; ?>
+            </div>
+        </div>
+    <?php endforeach; ?>
+    </div>
+    <?php endforeach; ?>
+    <p class="pay-note">QR: JPG, PNG or WEBP, max 3 MB. Changes appear right away on the booking page.</p>
 
 <?php elseif ($tab === 'admins'): ?>
     <div class="page-head">
