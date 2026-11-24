@@ -38,14 +38,14 @@ const BV_MAIL = [
     'encryption' => 'tls',                // wag palitan
 
     // <<<<<< PALITAN DITO #1: ang Gmail na magsesend ng emails
-    'username'   => 'sd3551415@gmail.com',
+    'username'   => 'bellavistaoasisspa@gmail.com',
 
     // <<<<<< PALITAN DITO #2: ang BAGONG 16-letter app password (galing sa myaccount.google.com/apppasswords)
     //        Okay lang kahit may spaces. Wag ang normal na password ng Gmail.
-    'password'   => 'yqta zlko jzxr taac',
+    'password'   => 'bvkh ekev uvzj figi',
 
     // <<<<<< PALITAN DITO #3: dapat PAREHO ng username sa taas
-    'from_email' => 'sd3551415@gmail.com',
+    'from_email' => 'bellavistaoasisspa@gmail.com',
 
     'from_name'  => 'Bella Vista Oasis Spa',   // pangalan na makikita ng customer, pwedeng palitan
     'verify_ssl' => false,               // gawing false LANG kung may "certificate" error
@@ -101,6 +101,15 @@ function bv_mail_outbox_dir(): string
         @file_put_contents($dir . '/.htaccess', "Require all denied\n");   // customer emails must not be public
     }
     return $dir;
+}
+
+/** Logo used in emails: assets/images/email_logo.png. Empty string if the file is missing (the email still works, just without the logo). */
+function bv_mail_logo_bytes(): string
+{
+    $path = __DIR__ . '/assets/images/email_logo.png';
+    if (!is_file($path)) return '';
+    $bytes = @file_get_contents($path);
+    return $bytes === false ? '' : $bytes;
 }
 
 function bv_mail_log_error(string $message): void
@@ -167,11 +176,38 @@ function bv_smtp_connect(array $cfg)
     return $socket;
 }
 
+/** For the outbox copy only: swaps the embedded-logo reference for a data URI so it opens in a browser. */
+function bv_mail_preview_html(string $html): string
+{
+    if (bv_mail_logo_bytes() === '') return $html;
+    return str_replace('cid:bvlogo', 'data:image/png;base64,' . base64_encode(bv_mail_logo_bytes()), $html);
+}
+
 /** Builds the full message: headers + plain-text part + HTML part. */
 function bv_mail_build_message(array $cfg, string $fromEmail, string $toEmail, string $toName, string $subject, string $html, string $text): string
 {
     $encodeHeader = fn(string $value): string => '=?UTF-8?B?' . base64_encode($value) . '?=';
-    $boundary = 'bv_' . bin2hex(random_bytes(8));
+    $alt = 'bvA_' . bin2hex(random_bytes(8));
+    $rel = 'bvR_' . bin2hex(random_bytes(8));
+    $hasLogo = strpos($html, 'cid:bvlogo') !== false && bv_mail_logo_bytes() !== '';
+
+    $altBody = '--' . $alt . "\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n"
+             . chunk_split(base64_encode($text))
+             . '--' . $alt . "\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n"
+             . chunk_split(base64_encode($html))
+             . '--' . $alt . '--';
+
+    if ($hasLogo) {
+        // The logo travels inside the email itself (works in Gmail even from localhost).
+        $contentType = 'multipart/related; boundary="' . $rel . '"';
+        $body = '--' . $rel . "\r\nContent-Type: multipart/alternative; boundary=\"" . $alt . "\"\r\n\r\n" . $altBody . "\r\n"
+              . '--' . $rel . "\r\nContent-Type: image/png; name=\"logo.png\"\r\nContent-Transfer-Encoding: base64\r\nContent-ID: <bvlogo>\r\nContent-Disposition: inline; filename=\"logo.png\"\r\n\r\n"
+              . chunk_split(base64_encode(bv_mail_logo_bytes()))
+              . '--' . $rel . '--';
+    } else {
+        $contentType = 'multipart/alternative; boundary="' . $alt . '"';
+        $body = $altBody;
+    }
 
     $headers = [
         'Date: ' . date('r'),
@@ -180,13 +216,8 @@ function bv_mail_build_message(array $cfg, string $fromEmail, string $toEmail, s
         'Subject: ' . $encodeHeader($subject),
         'Message-ID: <' . bin2hex(random_bytes(10)) . '@bellavista.local>',
         'MIME-Version: 1.0',
-        'Content-Type: multipart/alternative; boundary="' . $boundary . '"',
+        'Content-Type: ' . $contentType,
     ];
-    $body = '--' . $boundary . "\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n"
-          . chunk_split(base64_encode($text))
-          . '--' . $boundary . "\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n"
-          . chunk_split(base64_encode($html))
-          . '--' . $boundary . '--';
     return implode("\r\n", $headers) . "\r\n\r\n" . $body;
 }
 
@@ -204,7 +235,7 @@ function bv_send_mail(string $toEmail, string $toName, string $subject, string $
     // Not set up yet: keep a copy in the outbox folder so the email can still be shown.
     if ($cfg['username'] === '' || $cfg['password'] === '') {
         $file = bv_mail_outbox_dir() . '/' . date('Ymd_His') . '_' . preg_replace('/[^A-Za-z0-9]+/', '-', $toEmail) . '.html';
-        @file_put_contents($file, '<!-- To: ' . bv_mail_h($toEmail) . ' | Subject: ' . bv_mail_h($subject) . " -->\n" . $html);
+        @file_put_contents($file, '<!-- To: ' . bv_mail_h($toEmail) . ' | Subject: ' . bv_mail_h($subject) . " -->\n" . bv_mail_preview_html($html));
         return [false, 'Email is not set up yet (fill in BV_MAIL in mailer.php). A copy was saved in the outbox folder.'];
     }
 
@@ -233,45 +264,51 @@ function bv_send_mail(string $toEmail, string $toName, string $subject, string $
 /** Table of label / value rows. $rows = [['Date', 'Monday...'], ...] */
 function bv_email_rows(array $rows): string
 {
-    $html = '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #f0e7da;margin-bottom:6px;">';
+    $html = '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #d9e2d3;margin-bottom:6px;">';
     foreach ($rows as [$label, $value]) {
-        $html .= '<tr><td style="padding:10px 0;border-bottom:1px solid #f0e7da;font-size:14px;color:#6f5f52;">' . bv_mail_h($label)
-               . '</td><td align="right" style="padding:10px 0;border-bottom:1px solid #f0e7da;font-size:14px;font-weight:bold;">' . bv_mail_h($value) . '</td></tr>';
+        $html .= '<tr><td style="padding:10px 0;border-bottom:1px solid #d9e2d3;font-size:14px;color:#5d6a5f;">' . bv_mail_h($label)
+               . '</td><td align="right" style="padding:10px 0;border-bottom:1px solid #d9e2d3;font-size:14px;font-weight:bold;">' . bv_mail_h($value) . '</td></tr>';
     }
     return $html . '</table>';
 }
 
-/** The shared look: brand bar, heading, content, optional button, footer. $heading and $intro are plain text. */
+/** The shared look: logo header, heading, content, optional button, footer. $heading and $intro are plain text. */
 function bv_email_layout(string $heading, string $intro, string $contentHtml, string $buttonLabel = '', string $buttonUrl = ''): string
 {
     $spa = bv_spa_info();
     $button = $buttonUrl === '' ? '' :
-        '<p style="text-align:center;margin:26px 0 6px;"><a href="' . bv_mail_h($buttonUrl) . '" style="display:inline-block;background:#5a4030;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:999px;font-size:14px;letter-spacing:1px;">' . bv_mail_h($buttonLabel) . '</a></p>';
+        '<p style="text-align:center;margin:28px 0 6px;"><a href="' . bv_mail_h($buttonUrl) . '" style="display:inline-block;background:#4f6b55;color:#ffffff;text-decoration:none;padding:14px 32px;border-radius:999px;font-size:13px;letter-spacing:2px;text-transform:uppercase;">' . bv_mail_h($buttonLabel) . '</a></p>';
 
-    return '<!doctype html><html><body style="margin:0;padding:0;background:#f7f1e8;font-family:Arial,Helvetica,sans-serif;color:#3f2d20;">'
-        . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f7f1e8;padding:24px 12px;"><tr><td align="center">'
-        . '<table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#fffdf9;border:1px solid #e8dccb;border-radius:18px;overflow:hidden;">'
-        . '<tr><td style="background:#5a4030;padding:22px 28px;text-align:center;color:#ffffff;letter-spacing:4px;font-size:14px;">&#10022; BELLA VISTA OASIS SPA</td></tr>'
-        . '<tr><td style="padding:28px;">'
-        . '<h1 style="margin:0 0 10px;font-family:Georgia,serif;font-size:26px;font-weight:normal;">' . bv_mail_h($heading) . '</h1>'
-        . '<p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#6f5f52;">' . bv_mail_h($intro) . '</p>'
+    $logo = bv_mail_logo_bytes() === '' ? '' : '<img src="cid:bvlogo" width="84" height="84" alt="Bella Vista Oasis Spa" style="display:block;margin:0 auto 12px;border:0;width:84px;height:84px;">';
+
+    return '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only"><meta name="supported-color-schemes" content="light only"><style>:root{color-scheme:light only;supported-color-schemes:light only;}</style></head><body bgcolor="#edf2e9" style="margin:0;padding:0;background:#edf2e9;font-family:Arial,Helvetica,sans-serif;color:#2c3a30;">'
+        . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#edf2e9" style="background:#edf2e9;padding:24px 12px;"><tr><td align="center">'
+        . '<table role="presentation" width="560" cellpadding="0" cellspacing="0" bgcolor="#fdf9f2" style="max-width:560px;width:100%;background:#fdf9f2;border:1px solid #d9e2d3;border-radius:18px;overflow:hidden;">'
+        . '<tr><td bgcolor="#fdf9f2" style="background:#fdf9f2;padding:28px 28px 20px;text-align:center;border-bottom:3px solid #b08d57;">'
+        . $logo
+        . '<div style="font-family:Georgia,serif;font-size:18px;letter-spacing:5px;color:#2f4033;">BELLA VISTA</div>'
+        . '<div style="font-size:11px;letter-spacing:6px;color:#5d6a5f;margin-top:4px;">OASIS SPA</div>'
+        . '</td></tr>'
+        . '<tr><td style="padding:30px 28px;">'
+        . '<h1 style="margin:0 0 10px;font-family:Georgia,serif;font-size:27px;font-weight:normal;color:#2f4033;">' . bv_mail_h($heading) . '</h1>'
+        . '<p style="margin:0 0 22px;font-size:15px;line-height:1.7;color:#5d6a5f;">' . bv_mail_h($intro) . '</p>'
         . $contentHtml . $button
         . '</td></tr>'
-        . '<tr><td style="padding:18px 28px;background:#f6f0e7;font-size:12px;line-height:1.7;color:#6f5f52;text-align:center;">'
+        . '<tr><td bgcolor="#e4ecdf" style="padding:20px 28px;background:#e4ecdf;border-top:1px solid #d1ddcb;font-size:12px;line-height:1.8;color:#4f6b55;text-align:center;">'
         . bv_mail_h($spa['address']) . '<br>' . bv_mail_h($spa['hours']) . ' &middot; ' . bv_mail_h($spa['phone'])
         . '</td></tr></table></td></tr></table></body></html>';
 }
 
 function bv_email_code_box(string $code): string
 {
-    return '<div style="margin:0 0 22px;padding:16px;border:1px dashed #cdbfae;border-radius:12px;text-align:center;">'
-         . '<div style="font-size:12px;letter-spacing:2px;color:#6f5f52;">BOOKING CODE</div>'
-         . '<div style="font-size:26px;font-weight:bold;letter-spacing:3px;margin-top:4px;">' . bv_mail_h($code) . '</div></div>';
+    return '<div style="margin:0 0 22px;padding:16px;border:1px dashed #b08d57;border-radius:12px;background:#f4f7f2;text-align:center;">'
+         . '<div style="font-size:12px;letter-spacing:3px;color:#86652f;">BOOKING CODE</div>'
+         . '<div style="font-size:26px;font-weight:bold;letter-spacing:3px;margin-top:4px;color:#2f4033;">' . bv_mail_h($code) . '</div></div>';
 }
 
 function bv_email_notice_box(string $title, string $text): string
 {
-    return '<div style="margin:18px 0 0;padding:16px 18px;border-radius:12px;background:#fbf1dc;color:#7d5a17;font-size:14px;line-height:1.6;">'
+    return '<div style="margin:18px 0 0;padding:16px 18px;border-radius:12px;background:#eaf0e7;border-left:4px solid #b08d57;color:#2f4033;font-size:14px;line-height:1.6;">'
          . '<strong>' . bv_mail_h($title) . '</strong><br>' . bv_mail_h($text) . '</div>';
 }
 
